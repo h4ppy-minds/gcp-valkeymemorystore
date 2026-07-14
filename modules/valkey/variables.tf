@@ -1,4 +1,74 @@
 ############################################
+# Deployment Topology & Disaster Recovery
+############################################
+
+variable "deployment_topology" {
+  type        = string
+  description = <<-EOT
+    Self-documenting label for what the customer is asking for:
+      STANDALONE: single instance, no replicas, no cross-region DR.
+      HA: single instance with replica(s) and/or MULTI_ZONE distribution,
+        still one region, no cross-region DR.
+      DR: adds a SECONDARY instance in a second region, replicating from
+        this instance (which becomes PRIMARY).
+
+    This variable does NOT silently override replica_count /
+    enable_cross_region_replication — it's validated for consistency
+    against them (see the check block below) so the module's actual
+    behavior stays fully explained by its explicit variables, while still
+    giving you one clear knob to talk through with the customer.
+  EOT
+  default     = "STANDALONE"
+  nullable    = false
+
+  validation {
+    condition     = contains(["STANDALONE", "HA", "DR"], var.deployment_topology)
+    error_message = "deployment_topology must be one of: STANDALONE, HA, DR."
+  }
+}
+
+variable "enable_cross_region_replication" {
+  type        = bool
+  description = "Whether to provision a SECONDARY instance in another region for DR. Set true only for deployment_topology = DR."
+  default     = false
+  nullable    = false
+}
+
+variable "secondary_location" {
+  type        = string
+  description = "GCP region for the SECONDARY instance. Required when enable_cross_region_replication = true. Must differ from location."
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = var.secondary_location == null || var.secondary_location != var.location
+    error_message = "secondary_location must differ from location (primary and secondary must be in different regions)."
+  }
+}
+
+check "deployment_topology_consistency" {
+  assert {
+    condition     = var.deployment_topology != "STANDALONE" || (var.replica_count == 0 && !var.enable_cross_region_replication)
+    error_message = "deployment_topology = STANDALONE requires replica_count = 0 and enable_cross_region_replication = false."
+  }
+  assert {
+    condition     = var.deployment_topology != "HA" || (var.replica_count >= 1 && !var.enable_cross_region_replication)
+    error_message = "deployment_topology = HA requires replica_count >= 1 and enable_cross_region_replication = false. (MULTI_ZONE zone_distribution_mode is also recommended for HA, but not enforced here.)"
+  }
+  assert {
+    condition     = var.deployment_topology != "DR" || var.enable_cross_region_replication
+    error_message = "deployment_topology = DR requires enable_cross_region_replication = true."
+  }
+}
+
+check "dr_requires_secondary_location" {
+  assert {
+    condition     = !var.enable_cross_region_replication || var.secondary_location != null
+    error_message = "enable_cross_region_replication = true requires secondary_location to be set."
+  }
+}
+
+############################################
 # Core Identity
 ############################################
 
@@ -22,7 +92,7 @@ variable "consumer_project_id" {
 variable "environment" {
   type        = string
   description = "Deployment environment: DEV, QA, UAT, or PROD. Drives stricter preconditions (e.g. blocks SHARED_CORE_NANO in PROD)."
-  default     = "DEV"
+
   validation {
     condition     = contains(["DEV", "QA", "UAT", "PROD"], upper(var.environment))
     error_message = "environment must be one of: DEV, QA, UAT, PROD."
@@ -79,6 +149,11 @@ variable "zone" {
     condition     = var.zone_distribution_mode != "MULTI_ZONE" || var.zone == null
     error_message = "zone must not be set when zone_distribution_mode is MULTI_ZONE."
   }
+}
+variable "secondary_zone" {
+  description = "Zone to pin the SECONDARY (DR) instance to. Only used when enable_cross_region_replication = true and zone_distribution_mode = SINGLE_ZONE. Auto-selected if left null."
+  type        = string
+  default     = null
 }
 
 ############################################
@@ -144,19 +219,6 @@ variable "replica_count" {
   }
 }
 
-#just to checj if it pass plan state
-variable "psc_attachment_count" {
-  type        = number
-  description = "Number of service attachments the instance will expose (used to size USER-mode forwarding rules/IPs per network). Typically 1 for CLUSTER_DISABLED (single primary). For CLUSTER mode, this is usually 1 discovery attachment + 1 per shard — check psc_attachment_details on an existing instance of the same shape, or start at 1 and increase if `google_memorystore_instance_desired_user_created_endpoints` rejects missing connections."
-  default     = 1
-  nullable    = false
-
-  validation {
-    condition     = var.psc_attachment_count >= 1
-    error_message = "psc_attachment_count must be at least 1."
-  }
-}
-
 ############################################
 # PSC Connectivity Mode
 ############################################
@@ -197,6 +259,29 @@ variable "user_networks" {
     subnet_cidr = string
   }))
   default = {}
+}
+
+variable "psc_attachment_count" {
+  type        = number
+  description = <<-EOT
+    Number of service attachments the instance exposes (used to size
+    USER-mode forwarding rules/IPs per network — for_each keys must be
+    known at plan time, so this can't be derived from the instance itself).
+
+    Typical values: CLUSTER_DISABLED = 2 (PRIMARY + READER). CLUSTER mode =
+    1 DISCOVERY attachment (clients use it to auto-discover shards, so no
+    per-shard attachment is needed here). If unsure, start at the value
+    matching your cluster_mode and re-check psc_attachment_details on an
+    existing instance if `google_memorystore_instance_desired_user_created_endpoints`
+    ends up missing a connection.
+  EOT
+  default     = 2
+  nullable    = false
+
+  validation {
+    condition     = var.psc_attachment_count >= 1
+    error_message = "psc_attachment_count must be at least 1."
+  }
 }
 
 check "psc_mode_inputs_present" {
@@ -254,7 +339,7 @@ variable "server_ca_mode" {
     CA mode for TLS server certificates. Immutable after creation — cannot be
     changed or deactivated once the instance is created.
 
-    GOOGLE_MANAGED_PER_INSTANCE_CA (default): Google generates a unique CA per
+    GOOGLE_MANAGED_CA_PER_INSTANCE (default): Google generates a unique CA per
       instance. Every client must download and install that instance's specific
       CA cert. Highest isolation, highest client-side cert management overhead.
 
@@ -262,8 +347,8 @@ variable "server_ca_mode" {
       across all instances in that region. Clients install one bundle per
       region instead of one per instance — simplest to operate at scale.
 
-    CUSTOMER_MANAGED_CAS_CA: Uses your own CA pool in Certificate Authority
-      Service (CAS). Requires server_ca_pool to be set. Best for compliance
+    CUSTOMER_MANAGED_CA: Uses your own CA pool in Certificate Authority Service
+      (CAS). Requires server_ca_pool to be set. Best for compliance
       requirements around key custody/rotation.
   EOT
   default     = "GOOGLE_MANAGED_PER_INSTANCE_CA"
@@ -287,15 +372,15 @@ variable "server_ca_pool" {
 
 check "customer_managed_ca_requires_pool" {
   assert {
-    condition     = !(var.server_ca_mode == "CUSTOMER_MANAGED_CAS_CA" && var.server_ca_pool == null)
-    error_message = "server_ca_mode = CUSTOMER_MANAGED_CAS_CA requires server_ca_pool to be set to a valid CA pool resource ID."
+    condition     = !(var.server_ca_mode == "CUSTOMER_MANAGED_CA" && var.server_ca_pool == null)
+    error_message = "server_ca_mode = CUSTOMER_MANAGED_CA requires server_ca_pool to be set to a valid CA pool resource ID."
   }
 }
 
 check "server_ca_pool_requires_tls" {
   assert {
     condition = !(
-      var.server_ca_mode == "CUSTOMER_MANAGED_CAS_CA" &&
+      var.server_ca_mode == "CUSTOMER_MANAGED_CA" &&
       var.transit_encryption_mode == "TRANSIT_ENCRYPTION_DISABLED"
     )
     error_message = "A configured server_ca_mode requires transit_encryption_mode = SERVER_AUTHENTICATION. TLS cannot be disabled once a CA mode is configured."

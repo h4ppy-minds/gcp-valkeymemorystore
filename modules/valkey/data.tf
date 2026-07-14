@@ -16,3 +16,12 @@ data "google_compute_zones" "available_zones" {
 data "google_project" "host_project" {
   project_id = var.project_id
 }
+
+# Used by locals.tf to auto-select (or validate) a zone for the SECONDARY
+# (DR) instance when zone_distribution_mode = SINGLE_ZONE. Only queried
+# when cross-region replication is actually enabled.
+data "google_compute_zones" "available_secondary_zones" {
+  count   = var.enable_cross_region_replication ? 1 : 0
+  project = var.project_id
+  region  = var.secondary_location
+}

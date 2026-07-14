@@ -18,16 +18,6 @@ output "psc_connectivity_mode" {
   value       = var.psc_connectivity_mode
 }
 
-output "psc_attachment_details" {
-  description = "..."
-  value = [
-    for a in google_memorystore_instance.shared-instance.psc_attachment_details : {
-      connection_type    = a.connection_type
-      service_attachment = a.service_attachment
-    }
-  ]
-}
-
 output "consumer_project_id" {
   description = "The project the consumer VPC network(s) were created in."
   value       = local.effective_consumer_project_id
@@ -60,4 +50,30 @@ output "user_mode_forwarding_rules" {
   value = var.psc_connectivity_mode == "USER" ? {
     for k, fr in google_compute_forwarding_rule.user_fr : k => fr.self_link
   } : {}
+}
+
+output "psc_attachment_details" {
+  description = "Service attachments exposed by the primary instance (connection_type + service_attachment). Useful for confirming psc_attachment_count matches reality."
+  value = [
+    for a in google_memorystore_instance.shared-instance.psc_attachment_details : {
+      connection_type    = a.connection_type
+      service_attachment = a.service_attachment
+    }
+  ]
+}
+
+# --- DR (secondary instance) outputs ---
+output "secondary_instance_id" {
+  description = "Instance ID of the SECONDARY (DR) instance. Null unless enable_cross_region_replication = true."
+  value       = var.enable_cross_region_replication ? google_memorystore_instance.secondary[0].instance_id : null
+}
+
+output "secondary_psc_attachment_details" {
+  description = "Service attachments exposed by the secondary instance. Empty unless enable_cross_region_replication = true."
+  value = var.enable_cross_region_replication ? [
+    for a in google_memorystore_instance.secondary[0].psc_attachment_details : {
+      connection_type    = a.connection_type
+      service_attachment = a.service_attachment
+    }
+  ] : []
 }

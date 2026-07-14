@@ -9,6 +9,5 @@ terraform {
 
 provider "google" {
   # Configuration options
-  project = "my-project-id"
-  region  = "us-east1"
+  project = var.project_id
 }

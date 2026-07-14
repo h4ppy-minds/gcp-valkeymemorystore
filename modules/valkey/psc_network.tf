@@ -37,11 +37,6 @@ resource "google_compute_subnetwork" "auto_producer_subnet" {
   ip_cidr_range = "10.0.0.248/29" # small range — only used for PSC IP allocation
   region        = var.location
   network       = google_compute_network.auto_producer_net[0].id
-  log_config {
-    aggregation_interval = "INTERVAL_10_MIN"
-    flow_sampling        = 0.5
-    metadata             = "INCLUDE_ALL_METADATA"
-  }
 }
 
 resource "google_network_connectivity_service_connection_policy" "auto_policy" {
@@ -54,6 +49,44 @@ resource "google_network_connectivity_service_connection_policy" "auto_policy" {
 
   psc_config {
     subnetworks = [google_compute_subnetwork.auto_producer_subnet[0].id]
+  }
+}
+
+############################################
+# AUTO mode — SECONDARY (DR only)
+#
+# A full, independent copy of the AUTO networking stack, in
+# secondary_location. PSC connections are strictly regional, so the
+# secondary cannot share the primary's network/subnet/policy even though
+# both may live in the same consumer project.
+############################################
+
+resource "google_compute_network" "auto_producer_net_secondary" {
+  count                   = (var.psc_connectivity_mode == "AUTO" && var.enable_cross_region_replication) ? 1 : 0
+  project                 = local.effective_consumer_project_id
+  name                    = "${var.instance_id}-dr-net"
+  auto_create_subnetworks = false
+}
+
+resource "google_compute_subnetwork" "auto_producer_subnet_secondary" {
+  count         = (var.psc_connectivity_mode == "AUTO" && var.enable_cross_region_replication) ? 1 : 0
+  project       = local.effective_consumer_project_id
+  name          = "${var.instance_id}-dr-subnet"
+  ip_cidr_range = "10.0.1.248/29"
+  region        = var.secondary_location
+  network       = google_compute_network.auto_producer_net_secondary[0].id
+}
+
+resource "google_network_connectivity_service_connection_policy" "auto_policy_secondary" {
+  count         = (var.psc_connectivity_mode == "AUTO" && var.enable_cross_region_replication) ? 1 : 0
+  project       = local.effective_consumer_project_id
+  name          = "${var.instance_id}-dr-scp"
+  location      = var.secondary_location
+  service_class = "gcp-memorystore"
+  network       = google_compute_network.auto_producer_net_secondary[0].id
+
+  psc_config {
+    subnetworks = [google_compute_subnetwork.auto_producer_subnet_secondary[0].id]
   }
 }
 
@@ -75,11 +108,6 @@ resource "google_compute_subnetwork" "user_subnet" {
   ip_cidr_range = each.value.subnet_cidr
   region        = var.location
   network       = google_compute_network.user_net[each.key].id
-  log_config {
-    aggregation_interval = "INTERVAL_10_MIN"
-    flow_sampling        = 0.5
-    metadata             = "INCLUDE_ALL_METADATA"
-  }
 }
 
 # One reserved IP per (consumer network × service attachment). A single
@@ -125,10 +153,7 @@ resource "google_compute_forwarding_rule" "user_fr" {
 # HOST project — this is what flips each connection from PENDING to
 # ACTIVE. One `desired_user_created_endpoints` block per consumer network;
 # within it, one `connections` block per service attachment reachable from
-# that network. `psc_connection` is an object attribute (uses `=`), not a
-# nested block — this is the one place this resource's syntax differs from
-# the rest of the provider, and the mistake that broke the first version
-# of this file ("Unsupported block type: endpoints").
+# that network, each containing a nested `psc_connection` block.
 resource "google_memorystore_instance_desired_user_created_endpoints" "user_registration" {
   count   = var.psc_connectivity_mode == "USER" ? 1 : 0
   project = var.project_id
@@ -147,6 +172,79 @@ resource "google_memorystore_instance_desired_user_created_endpoints" "user_regi
             forwarding_rule    = google_compute_forwarding_rule.user_fr["${desired_user_created_endpoints.key}-${connections.value}"].id
             network            = google_compute_network.user_net[desired_user_created_endpoints.key].id
             service_attachment = google_memorystore_instance.shared-instance.psc_attachment_details[connections.value].service_attachment
+          }
+        }
+      }
+    }
+  }
+}
+
+############################################
+# USER mode — SECONDARY (DR only)
+#
+# Mirrors the primary's USER-mode block exactly, targeting the
+# secondary instance's own service attachments in secondary_location.
+# Requires the same two-phase apply as the primary (create secondary
+# instance first via -target, then apply again), keyed off the secondary
+# instance instead of the primary.
+############################################
+
+resource "google_compute_network" "user_net_secondary" {
+  for_each                = length(local.secondary_user_network_attachments) > 0 ? var.user_networks : {}
+  project                 = local.effective_consumer_project_id
+  name                    = "${var.instance_id}-dr-${each.key}-net"
+  auto_create_subnetworks = false
+}
+
+resource "google_compute_subnetwork" "user_subnet_secondary" {
+  for_each      = length(local.secondary_user_network_attachments) > 0 ? var.user_networks : {}
+  project       = local.effective_consumer_project_id
+  name          = "${var.instance_id}-dr-${each.key}-subnet"
+  ip_cidr_range = each.value.subnet_cidr
+  region        = var.secondary_location
+  network       = google_compute_network.user_net_secondary[each.key].id
+}
+
+resource "google_compute_address" "user_endpoint_ip_secondary" {
+  for_each     = local.secondary_user_network_attachments
+  project      = local.effective_consumer_project_id
+  name         = "${var.instance_id}-dr-${each.key}-ip"
+  region       = var.secondary_location
+  subnetwork   = google_compute_subnetwork.user_subnet_secondary[each.value.network_key].id
+  address_type = "INTERNAL"
+  purpose      = "GCE_ENDPOINT"
+}
+
+resource "google_compute_forwarding_rule" "user_fr_secondary" {
+  for_each                = local.secondary_user_network_attachments
+  project                 = local.effective_consumer_project_id
+  name                    = "${var.instance_id}-dr-${each.key}-fr"
+  region                  = var.secondary_location
+  network                 = google_compute_network.user_net_secondary[each.value.network_key].id
+  ip_address              = google_compute_address.user_endpoint_ip_secondary[each.key].id
+  load_balancing_scheme   = ""
+  target                  = google_memorystore_instance.secondary[0].psc_attachment_details[each.value.attachment_index].service_attachment
+  allow_psc_global_access = true
+}
+
+resource "google_memorystore_instance_desired_user_created_endpoints" "user_registration_secondary" {
+  count   = (var.psc_connectivity_mode == "USER" && var.enable_cross_region_replication) ? 1 : 0
+  project = var.project_id
+  name    = google_memorystore_instance.secondary[0].instance_id
+  region  = var.secondary_location
+
+  dynamic "desired_user_created_endpoints" {
+    for_each = var.user_networks
+    content {
+      dynamic "connections" {
+        for_each = local.psc_attachment_indices
+        content {
+          psc_connection {
+            psc_connection_id  = google_compute_forwarding_rule.user_fr_secondary["${desired_user_created_endpoints.key}-${connections.value}"].psc_connection_id
+            ip_address         = google_compute_address.user_endpoint_ip_secondary["${desired_user_created_endpoints.key}-${connections.value}"].address
+            forwarding_rule    = google_compute_forwarding_rule.user_fr_secondary["${desired_user_created_endpoints.key}-${connections.value}"].id
+            network            = google_compute_network.user_net_secondary[desired_user_created_endpoints.key].id
+            service_attachment = google_memorystore_instance.secondary[0].psc_attachment_details[connections.value].service_attachment
           }
         }
       }

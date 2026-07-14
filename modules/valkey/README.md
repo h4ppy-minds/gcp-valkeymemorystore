@@ -209,3 +209,34 @@ persistence, no backups, auth disabled — enough to validate the
 connectivity plumbing works without exercising every feature at once.
 Once that succeeds, layer on persistence/backups/auth/CA/CMEK
 incrementally rather than enabling everything in one pass.
+
+Found it. Here's the breakdown for the Memorystore for Valkey REST API (`v1`):
+
+## `PscAttachmentDetail`
+
+This is an **output-only** field on the `Instance` resource (`pscAttachmentDetails[]`) that tells you which service attachments exist so you can create your own PSC connections against them.
+
+```json
+{
+  "serviceAttachment": string,
+  "connectionType": enum(ConnectionType)
+}
+```
+
+| Field | Description |
+|---|---|
+| `serviceAttachment` | URI of the service attachment your self-created PSC connection should target. |
+| `connectionType` | Which role this attachment's connection will serve (see below). |
+
+## `ConnectionType` enum (shared across `PscAttachmentDetail`, `PscAutoConnection`, and `PscConnection`)
+
+| Value | Meaning |
+|---|---|
+| `CONNECTION_TYPE_UNSPECIFIED` | Not set. |
+| `CONNECTION_TYPE_DISCOVERY` | Used for topology discovery (the discovery endpoint). |
+| `CONNECTION_TYPE_PRIMARY` | Used as the primary endpoint (read/write access to the primary node) — mainly relevant for Cluster Mode Disabled instances. |
+| `CONNECTION_TYPE_READER` | Used as the reader endpoint (access to replicas) — mainly relevant for Cluster Mode Disabled instances. |
+
+So a Memorystore for Valkey instance's `pscAttachmentDetails` list will typically contain one entry per role it exposes — e.g., a Cluster Mode Enabled instance mainly needs `CONNECTION_TYPE_DISCOVERY` (plus one per shard/proxy depending on config), while a Cluster Mode Disabled instance can expose `CONNECTION_TYPE_DISCOVERY`, `CONNECTION_TYPE_PRIMARY`, and `CONNECTION_TYPE_READER`.
+
+This maps to the `PscAttachmentDetail` message documented at [cloud.google.com/memorystore/docs/valkey/reference/rest/v1/projects.locations.instances](https://cloud.google.com/memorystore/docs/valkey/reference/rest/v1/projects.locations.instances#PscAttachmentDetail).
