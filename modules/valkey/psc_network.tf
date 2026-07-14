@@ -37,6 +37,11 @@ resource "google_compute_subnetwork" "auto_producer_subnet" {
   ip_cidr_range = "10.0.0.248/29" # small range — only used for PSC IP allocation
   region        = var.location
   network       = google_compute_network.auto_producer_net[0].id
+  log_config {
+    aggregation_interval = "INTERVAL_10_MIN"
+    flow_sampling        = 0.5
+    metadata             = "INCLUDE_ALL_METADATA"
+  }
 }
 
 resource "google_network_connectivity_service_connection_policy" "auto_policy" {
@@ -75,6 +80,11 @@ resource "google_compute_subnetwork" "auto_producer_subnet_secondary" {
   ip_cidr_range = "10.0.1.248/29"
   region        = var.secondary_location
   network       = google_compute_network.auto_producer_net_secondary[0].id
+  log_config {
+    aggregation_interval = "INTERVAL_10_MIN"
+    flow_sampling        = 0.5
+    metadata             = "INCLUDE_ALL_METADATA"
+  }
 }
 
 resource "google_network_connectivity_service_connection_policy" "auto_policy_secondary" {
@@ -108,6 +118,11 @@ resource "google_compute_subnetwork" "user_subnet" {
   ip_cidr_range = each.value.subnet_cidr
   region        = var.location
   network       = google_compute_network.user_net[each.key].id
+  log_config {
+    aggregation_interval = "INTERVAL_10_MIN"
+    flow_sampling        = 0.5
+    metadata             = "INCLUDE_ALL_METADATA"
+  }
 }
 
 # One reserved IP per (consumer network × service attachment). A single
@@ -203,6 +218,11 @@ resource "google_compute_subnetwork" "user_subnet_secondary" {
   ip_cidr_range = each.value.subnet_cidr
   region        = var.secondary_location
   network       = google_compute_network.user_net_secondary[each.key].id
+  log_config {
+    aggregation_interval = "INTERVAL_10_MIN"
+    flow_sampling        = 0.5
+    metadata             = "INCLUDE_ALL_METADATA"
+  }
 }
 
 resource "google_compute_address" "user_endpoint_ip_secondary" {
