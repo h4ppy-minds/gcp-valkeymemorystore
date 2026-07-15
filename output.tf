@@ -37,3 +37,10 @@ output "user_mode_forwarding_rules" {
 output "psc_attachment_details" {
   value = module.valkey.psc_attachment_details
 }
+output "secondary_instance_id" {
+  value = module.valkey.secondary_instance_id
+}
+
+output "secondary_psc_attachment_details" {
+  value = module.valkey.secondary_psc_attachment_details
+}
