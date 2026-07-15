@@ -13,43 +13,14 @@ output "resolved_zone" {
   value       = local.effective_zone
 }
 
+output "shared_vpc_network_self_link" {
+  description = "Self link of the existing Shared VPC network used. Null unless psc_connectivity_mode = SHARED_VPC."
+  value       = var.psc_connectivity_mode == "SHARED_VPC" ? data.google_compute_network.shared_vpc_net[0].self_link : null
+}
+
 output "psc_connectivity_mode" {
-  description = "Which PSC connectivity mode this deployment used (AUTO or USER)."
+  description = "Which PSC connectivity mode this deployment used (NONE or SHARED_VPC)."
   value       = var.psc_connectivity_mode
-}
-
-output "consumer_project_id" {
-  description = "The project the consumer VPC network(s) were created in."
-  value       = local.effective_consumer_project_id
-}
-
-# --- AUTO mode connection info ---
-output "auto_mode_network_self_link" {
-  description = "Self link of the consumer VPC network created for AUTO mode. Null in USER mode."
-  value       = var.psc_connectivity_mode == "AUTO" ? google_compute_network.auto_producer_net[0].self_link : null
-}
-
-output "auto_mode_service_connection_policy" {
-  description = "Name of the Service Connection Policy authorizing the AUTO-mode PSC connection. Null in USER mode."
-  value       = var.psc_connectivity_mode == "AUTO" ? google_network_connectivity_service_connection_policy.auto_policy[0].name : null
-}
-
-# --- USER mode connection info ---
-# Keyed by "networkKey-attachmentIndex" — one entry per (consumer network x
-# service attachment) pair, since an instance can expose multiple
-# attachments (discovery + per-shard) that each need their own endpoint.
-output "user_mode_endpoint_ips" {
-  description = "Map of 'networkKey-attachmentIndex' -> reserved internal IP address that apps in each consumer VPC should connect to. Empty in AUTO mode."
-  value = var.psc_connectivity_mode == "USER" ? {
-    for k, addr in google_compute_address.user_endpoint_ip : k => addr.address
-  } : {}
-}
-
-output "user_mode_forwarding_rules" {
-  description = "Map of 'networkKey-attachmentIndex' -> forwarding rule self link created for USER mode. Empty in AUTO mode."
-  value = var.psc_connectivity_mode == "USER" ? {
-    for k, fr in google_compute_forwarding_rule.user_fr : k => fr.self_link
-  } : {}
 }
 
 output "psc_attachment_details" {

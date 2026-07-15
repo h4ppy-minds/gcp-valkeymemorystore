@@ -25,9 +25,10 @@ module "valkey" {
   shard_count   = var.shard_count
   replica_count = var.replica_count
 
-  psc_connectivity_mode = var.psc_connectivity_mode
-  user_networks         = var.user_networks
-  psc_attachment_count  = var.psc_attachment_count
+  psc_connectivity_mode   = var.psc_connectivity_mode
+  shared_vpc_host_project = var.shared_vpc_host_project
+  shared_vpc_network_name = var.shared_vpc_network_name
+  existing_scp_name       = var.existing_scp_name
 
   authorization_mode      = var.authorization_mode
   transit_encryption_mode = var.transit_encryption_mode

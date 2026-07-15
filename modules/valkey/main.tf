@@ -48,10 +48,10 @@ resource "google_memorystore_instance" "shared-instance" {
   # in psc_network.tf, once the instance (and its service attachments)
   # exist. See README.md for the two-phase apply this requires.
   dynamic "desired_auto_created_endpoints" {
-    for_each = var.psc_connectivity_mode == "AUTO" ? [1] : []
+    for_each = var.psc_connectivity_mode == "SHARED_VPC" ? [1] : []
     content {
-      network    = google_compute_network.auto_producer_net[0].id
-      project_id = local.effective_consumer_project_id
+      network    = local.effective_psc_network_id
+      project_id = var.shared_vpc_host_project
     }
   }
 
@@ -132,12 +132,6 @@ resource "google_memorystore_instance" "shared-instance" {
   # literal bool), which would defeat the point of a reusable module.
   deletion_protection_enabled = var.deletion_protection_enabled
 
-  # Service connection policy only exists in AUTO mode (count 0 or 1) —
-  # referencing the resource without an index is safe either way.
-  depends_on = [
-    google_network_connectivity_service_connection_policy.auto_policy,
-  ]
-
   lifecycle {
     precondition {
       condition     = local.valid_location
@@ -205,13 +199,12 @@ resource "google_memorystore_instance" "secondary" {
     }
   }
   dynamic "desired_auto_created_endpoints" {
-    for_each = var.psc_connectivity_mode == "AUTO" ? [1] : []
+    for_each = var.psc_connectivity_mode == "SHARED_VPC" ? [1] : []
     content {
-      network    = google_compute_network.auto_producer_net_secondary[0].id
-      project_id = local.effective_consumer_project_id
+      network    = local.effective_psc_network_id
+      project_id = var.shared_vpc_host_project
     }
   }
-
   # Must match the primary — cross-instance replication requires
   # consistent auth/TLS/CA/engine settings between the two.
   authorization_mode      = var.authorization_mode
@@ -262,10 +255,6 @@ resource "google_memorystore_instance" "secondary" {
   }
 
   deletion_protection_enabled = var.deletion_protection_enabled
-
-  depends_on = [
-    google_network_connectivity_service_connection_policy.auto_policy_secondary,
-  ]
 
   lifecycle {
     precondition {

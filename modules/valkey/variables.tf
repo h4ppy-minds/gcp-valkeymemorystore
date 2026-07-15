@@ -238,56 +238,36 @@ variable "psc_connectivity_mode" {
       instance, app projects consume it" pattern), or from multiple VPCs.
       No Service Connection Policy is used in this mode.
   EOT
-  default     = "AUTO"
+  default     = "NONE"
   nullable    = false
 
   validation {
-    condition     = contains(["AUTO", "USER", "NONE"], var.psc_connectivity_mode)
-    error_message = "psc_connectivity_mode must be one of: AUTO, USER, NONE."
+    condition     = contains(["NONE", "SHARED_VPC"], var.psc_connectivity_mode)
+    error_message = "psc_connectivity_mode must be one of: NONE, SHARED_VPC."
   }
 }
 
-variable "user_networks" {
-  description = <<-EOT
-    Map of consumer VPC networks to register PSC connections for, keyed by a
-    short name (e.g. "serviceproj1", "vpc-b"). Only used when
-    psc_connectivity_mode = USER. Each entry creates its own network, subnet,
-    reserved internal IP, and forwarding rule in consumer_project_id, then
-    registers that connection against the instance in project_id.
-  EOT
-  type = map(object({
-    subnet_cidr = string
-  }))
-  default = {}
+variable "shared_vpc_host_project" {
+  type    = string
+  default = null
+}
+variable "shared_vpc_network_name" {
+  type    = string
+  default = null
+}
+variable "existing_scp_name" {
+  type    = string
+  default = null
 }
 
-variable "psc_attachment_count" {
-  type        = number
-  description = <<-EOT
-    Number of service attachments the instance exposes (used to size
-    USER-mode forwarding rules/IPs per network — for_each keys must be
-    known at plan time, so this can't be derived from the instance itself).
-
-    Typical values: CLUSTER_DISABLED = 2 (PRIMARY + READER). CLUSTER mode =
-    1 DISCOVERY attachment (clients use it to auto-discover shards, so no
-    per-shard attachment is needed here). If unsure, start at the value
-    matching your cluster_mode and re-check psc_attachment_details on an
-    existing instance if `google_memorystore_instance_desired_user_created_endpoints`
-    ends up missing a connection.
-  EOT
-  default     = 2
-  nullable    = false
-
-  validation {
-    condition     = var.psc_attachment_count >= 1
-    error_message = "psc_attachment_count must be at least 1."
-  }
-}
-
-check "psc_mode_inputs_present" {
+check "shared_vpc_inputs_present" {
   assert {
-    condition     = var.psc_connectivity_mode != "USER" || length(var.user_networks) > 0
-    error_message = "psc_connectivity_mode = USER requires at least one entry in user_networks."
+    condition = var.psc_connectivity_mode != "SHARED_VPC" || (
+      var.shared_vpc_host_project != null &&
+      var.shared_vpc_network_name != null &&
+      var.existing_scp_name != null
+    )
+    error_message = "psc_connectivity_mode = SHARED_VPC requires shared_vpc_host_project, shared_vpc_network_name, and existing_scp_name."
   }
 }
 

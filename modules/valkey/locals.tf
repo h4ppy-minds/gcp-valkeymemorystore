@@ -1,8 +1,4 @@
 locals {
-  # --- Cross-project resolution ---
-  # Falls back to the host project when consumer_project_id isn't set
-  # (same-project deployments). Used throughout psc_network.tf.
-  effective_consumer_project_id = coalesce(var.consumer_project_id, var.project_id)
 
   # --- Zone resolution for SINGLE_ZONE mode ---
   effective_zone = var.zone_distribution_mode == "SINGLE_ZONE" ? coalesce(
@@ -30,26 +26,6 @@ locals {
     var.cluster_mode == "CLUSTER_DISABLED"
   )
 
-  # --- USER mode: one forwarding rule per (consumer network × service attachment) ---
-  # The instance exposes N service attachments via psc_attachment_details
-  # (e.g. PRIMARY + READER for CLUSTER_DISABLED, or DISCOVERY for CLUSTER
-  # mode). This count MUST be a static value (var.psc_attachment_count),
-  # not derived from the instance's actual psc_attachment_details list —
-  # for_each keys have to be known at plan time, and that list is only
-  # known after the instance is created. See README for how to determine
-  # the right count for your topology.
-  psc_attachment_indices = var.psc_connectivity_mode == "USER" ? range(var.psc_attachment_count) : []
-
-  user_network_attachments = var.psc_connectivity_mode == "USER" ? merge([
-    for net_key, net_val in var.user_networks : {
-      for idx in local.psc_attachment_indices :
-      "${net_key}-${idx}" => {
-        network_key      = net_key
-        attachment_index = idx
-      }
-    }
-  ]...) : {}
-
   # --- DR: secondary instance zone/location resolution ---
   effective_secondary_zone = (
     var.enable_cross_region_replication && var.zone_distribution_mode == "SINGLE_ZONE"
@@ -63,16 +39,9 @@ locals {
     contains(data.google_compute_regions.available_regions.names, var.secondary_location)
   )
 
-  # --- DR: secondary's own USER-mode attachment cross-product ---
-  secondary_user_network_attachments = (
-    var.enable_cross_region_replication && var.psc_connectivity_mode == "USER"
-    ) ? merge([
-      for net_key, net_val in var.user_networks : {
-        for idx in local.psc_attachment_indices :
-        "${net_key}-${idx}" => {
-          network_key      = net_key
-          attachment_index = idx
-        }
-      }
-  ]...) : {}
+  effective_psc_network_id = (
+    var.psc_connectivity_mode == "SHARED_VPC" ? try(data.google_compute_network.shared_vpc_net[0].id, null) : null
+  )
+
 }
+

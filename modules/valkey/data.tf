@@ -25,3 +25,9 @@ data "google_compute_zones" "available_secondary_zones" {
   project = var.project_id
   region  = var.secondary_location
 }
+
+data "google_compute_network" "shared_vpc_net" {
+  count   = var.psc_connectivity_mode == "SHARED_VPC" ? 1 : 0
+  project = var.shared_vpc_host_project
+  name    = var.shared_vpc_network_name
+}

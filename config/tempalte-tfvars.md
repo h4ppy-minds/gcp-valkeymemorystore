@@ -1,9 +1,18 @@
 # Valkey Terraform Module — Full `.tfvars` Template
 
-Every variable the module accepts, with comments explaining each one, valid
+Every variable the project accepts, with comments explaining each one, valid
 values, and defaults. Copy the block below into your own `.tfvars` file,
 delete what you don't need (most have sensible defaults), and fill in the
 rest.
+
+> **Note on connectivity modes:** this module supports only `NONE` (no
+> private connectivity — instance only) and `SHARED_VPC` (attach to an
+> existing Shared VPC network + a Service Connection Policy your platform
+> team already created). The `AUTO` and `USER` modes described in earlier
+> drafts of this module were removed — they created their own isolated VPC
+> (AUTO) or per-team VPCs (USER), which doesn't match this org's actual
+> networking (a central Shared VPC hub with a pre-existing SCP already
+> provisioned). See README.md for the full explanation.
 
 ```hcl
 ############################################
@@ -11,7 +20,7 @@ rest.
 ############################################
 
 project_id          = ""  # REQUIRED. Host project — where the Memorystore instance is created. No default.
-consumer_project_id = ""    # Project where the consumer VPC lives. Defaults to project_id if omitted (same-project deployments).
+consumer_project_id = ""    # Legacy input from the removed AUTO/USER modes. Not used by NONE or SHARED_VPC — verify modules/valkey/variables.tf still accepts it before setting this; if it was dropped there, remove it here too.
 environment          = "DEV"                    # REQUIRED. One of: DEV, QA, UAT, PROD. Drives stricter preconditions (e.g. blocks SHARED_CORE_NANO in PROD).
 instance_id          = "valkey-basic"           # Permanent, unique instance identifier. Immutable after creation. Default: "basic-instance".
 
@@ -36,6 +45,13 @@ secondary_zone                    = null            # Zone to pin the secondary 
 #   STANDALONE  -> replica_count must be 0, enable_cross_region_replication must be false
 #   HA          -> replica_count must be >= 1, enable_cross_region_replication must be false
 #   DR          -> enable_cross_region_replication must be true (secondary_location required)
+#
+# Note: if you use DR (enable_cross_region_replication = true) together
+# with psc_connectivity_mode = SHARED_VPC, the SECONDARY instance needs
+# its own existing SCP in secondary_location — SCPs are strictly
+# regional, so the primary's SCP does not cover the secondary. Confirm
+# your module has an existing_scp_name-equivalent input for the
+# secondary before relying on this combination.
 
 ############################################
 # Cluster Topology & Sizing
@@ -50,27 +66,12 @@ replica_count = 0                   # Replica nodes per shard, 0-5. Default: 0. 
 # PSC Connectivity Mode
 ############################################
 
-psc_connectivity_mode = "AUTO"  # AUTO (Memorystore creates the forwarding rule for you, single consumer VPC, same or cross-project) or USER (you create + register forwarding rules yourself; required for multi-VPC or when you want explicit control). Default: "AUTO".
+psc_connectivity_mode = "NONE"  # NONE (no private connectivity — instance only, useful for a bare-instance smoke test) or SHARED_VPC (attach to an existing Shared VPC network + a pre-existing Service Connection Policy). Default: "NONE".
 
-# Only used when psc_connectivity_mode = "USER". Map of consumer VPC networks
-# to wire up, keyed by a short name. Each entry gets its own network, subnet,
-# reserved IP, and forwarding rule.
-user_networks = {
-  serviceproj1 = {
-    subnet_cidr = "10.10.0.0/28"
-  }
-  # add more entries here for additional consumer VPCs
-}
-
-# Number of service attachments the instance exposes. NOT proportional to
-# shard_count/replica_count — CLUSTER mode always exposes exactly 2
-# (DISCOVERY + a paired attachment), regardless of cluster size, since
-# clients route between shards via the cluster protocol (MOVED/ASK
-# redirects) over a single connection, not via one PSC attachment per
-# shard. CLUSTER_DISABLED instances expose 2 as well (PRIMARY + READER).
-# In practice this value is almost always 2 — verify against
-# psc_attachment_details after first apply if in doubt.
-psc_attachment_count = 2
+# --- Only used when psc_connectivity_mode = "SHARED_VPC" ---
+shared_vpc_host_project = ""  # Host project ID that owns the existing Shared VPC network (the network "hub" project). REQUIRED if psc_connectivity_mode = SHARED_VPC.
+shared_vpc_network_name = ""  # Name of the existing Shared VPC network itself (the VPC's own name, not a project id — check console under VPC networks). REQUIRED if psc_connectivity_mode = SHARED_VPC.
+existing_scp_name       = ""  # Name of the existing Service Connection Policy (service_class = gcp-memorystore) your platform team already created for `location`. SCPs are regional — this must match a policy scoped to `location`, not just any policy in the host project. REQUIRED if psc_connectivity_mode = SHARED_VPC.
 
 ############################################
 # Authorization (AUTH) & TLS
@@ -91,6 +92,15 @@ transit_encryption_mode = "SERVER_AUTHENTICATION"  # TRANSIT_ENCRYPTION_DISABLED
 server_ca_mode = "GOOGLE_MANAGED_PER_INSTANCE_CA"
 
 server_ca_pool = null  # Full CA pool resource ID, e.g. "projects/PROJECT_ID/locations/REGION/caPools/POOL_ID". REQUIRED if server_ca_mode = CUSTOMER_MANAGED_CAS_CA.
+
+# ⚠️ Known inconsistency to verify in modules/valkey/variables.tf: the
+# server_ca_mode validation enum uses "CUSTOMER_MANAGED_CAS_CA", but the
+# module's check blocks (customer_managed_ca_requires_pool,
+# server_ca_pool_requires_tls) compare against "CUSTOMER_MANAGED_CA" —
+# missing "_CAS_". As written, those two checks can never fire, even
+# when server_ca_pool is genuinely missing. Fix the check blocks to
+# compare against "CUSTOMER_MANAGED_CAS_CA" before relying on that
+# validation in production.
 
 ############################################
 # Encryption at Rest (CMEK)
@@ -151,8 +161,9 @@ deletion_protection_enabled = true  # API-enforced (blocks delete via console/gc
 
 ## Quick presets
 
-**Cheapest possible test instance** (mirrors this module's own `test.tfvars`):
+**Cheapest possible bare-instance test (NONE mode — no PSC connectivity):**
 ```hcl
+psc_connectivity_mode        = "NONE"
 environment                  = "DEV"
 cluster_mode                 = "CLUSTER_DISABLED"
 node_type                    = "SHARED_CORE_NANO"
@@ -165,8 +176,32 @@ automated_backup_enabled     = false
 deletion_protection_enabled  = false
 ```
 
-**Production HA, single region:**
+**Shared VPC, single region (typical enterprise deployment):**
 ```hcl
+psc_connectivity_mode   = "SHARED_VPC"
+shared_vpc_host_project = "gcp3-core-net-npe-4b70"   # your network hub project
+shared_vpc_network_name = ""                          # fill in the actual VPC network name from console
+existing_scp_name       = ""                          # fill in the SCP name for this `location`, shown under Network Connectivity > PSC in console
+
+environment             = "DEV"
+cluster_mode            = "CLUSTER_DISABLED"
+node_type               = "SHARED_CORE_NANO"
+shard_count             = 1
+replica_count           = 0
+authorization_mode      = "AUTH_DISABLED"
+transit_encryption_mode = "TRANSIT_ENCRYPTION_DISABLED"
+persistence_mode        = "DISABLED"
+automated_backup_enabled    = false
+deletion_protection_enabled = false
+```
+
+**Production HA, Shared VPC, single region:**
+```hcl
+psc_connectivity_mode   = "SHARED_VPC"
+shared_vpc_host_project = "gcp3-core-net-npe-4b70"
+shared_vpc_network_name = ""
+existing_scp_name       = ""
+
 environment             = "PROD"
 cluster_mode            = "CLUSTER_DISABLED"
 node_type               = "STANDARD_SMALL"
@@ -180,10 +215,20 @@ aof_config              = { append_fsync = "EVERY_SEC" }
 automated_backup_enabled = true
 ```
 
-**Production DR, cross-region:**
+**Production DR, Shared VPC, cross-region:**
 ```hcl
+psc_connectivity_mode   = "SHARED_VPC"
+shared_vpc_host_project = "gcp3-core-net-npe-4b70"
+shared_vpc_network_name = ""
+existing_scp_name       = ""   # SCP for the PRIMARY region
+
 deployment_topology              = "DR"
 enable_cross_region_replication  = true
 secondary_location                 = "us-east1"
 replica_count                       = 1  # recommended alongside DR, not automatically enforced — see module notes
+
+# ⚠️ Verify: the secondary instance needs its own existing SCP in
+# secondary_location. If modules/valkey doesn't yet expose an
+# existing_scp_name input for the secondary specifically, this
+# combination isn't fully wired up yet — check before relying on it.
 ```
