@@ -14,7 +14,7 @@
 # talk about ("we want DR") that maps to a validated combination.
 ############################################
 
-resource "google_memorystore_instance" "shared-instance" {
+resource "google_memorystore_instance" "primary-instance" {
 
   # --- Identity ---
   instance_id = var.instance_id
@@ -50,8 +50,9 @@ resource "google_memorystore_instance" "shared-instance" {
   dynamic "desired_auto_created_endpoints" {
     for_each = var.psc_connectivity_mode == "SHARED_VPC" ? [1] : []
     content {
-      network    = local.effective_psc_network_id
-      project_id = var.shared_vpc_host_project
+      network = local.effective_psc_network_id
+      #project_id = var.shared_vpc_host_project
+      project_id = var.project_id
     }
   }
 
@@ -195,14 +196,15 @@ resource "google_memorystore_instance" "secondary" {
   cross_instance_replication_config {
     instance_role = "SECONDARY"
     primary_instance {
-      instance = google_memorystore_instance.shared-instance.id
+      instance = google_memorystore_instance.primary-instance.id
     }
   }
   dynamic "desired_auto_created_endpoints" {
     for_each = var.psc_connectivity_mode == "SHARED_VPC" ? [1] : []
     content {
-      network    = local.effective_psc_network_id
-      project_id = var.shared_vpc_host_project
+      network = local.effective_psc_network_id
+      #project_id = var.shared_vpc_host_project
+      project_id = var.project_id
     }
   }
   # Must match the primary — cross-instance replication requires

@@ -1,0 +1,85 @@
+dpe:
+  dev:
+    example1:
+      enabled: true ##### Setting this to false for existing resources will destroy them.
+
+      # --- Deployment Topology & DR ---
+      deployment_topology: "HA"
+      enable_cross_region_replication: false # HA requires this false (single region)
+      secondary_location: null
+
+      # --- Core Identity ---
+      project_id: "valkeyhubhost-500604"
+      consumer_project_id: null
+      environment: "DEV"
+      instance_id: "dpe-valkey-ha"
+
+      # --- Region / Zone ---
+      location: "us-east1"
+      zone_distribution_mode: "MULTI_ZONE" # recommended for HA — survives a single-zone outage
+      zone: null # must be null when MULTI_ZONE
+      secondary_zone: null # unused — no cross-region replication in HA
+
+      # --- Cluster Topology & Sizing ---
+      cluster_mode: "CLUSTER_DISABLED"
+      node_type: "STANDARD_SMALL"
+      shard_count: 1 # must be 1 when cluster_mode = CLUSTER_DISABLED
+      replica_count: 2 # HA requires >= 1
+
+      # --- PSC Connectivity ---
+      psc_connectivity_mode: "NONE"
+      shared_vpc_host_project: null
+      shared_vpc_network_name: null
+      existing_scp_name: null
+
+      # --- Authorization & TLS ---
+      authorization_mode: "AUTH_DISABLED"
+      transit_encryption_mode: "TRANSIT_ENCRYPTION_DISABLED"
+
+      # --- Certificate Authority ---
+      server_ca_mode: "GOOGLE_MANAGED_PER_INSTANCE_CA"
+      server_ca_pool: null
+
+      # --- Encryption at Rest ---
+      encryption_type: "GOOGLE_MANAGED"
+      kms_key: null
+
+      # --- Persistence ---
+      persistence_mode: "RDB"
+      rdb_snapshot_period: "TWENTY_FOUR_HOURS"
+      rdb_snapshot_start_time: null
+      aof_config: null
+
+      # --- Automated Backups ---
+      automated_backup_enabled: true
+      automated_backup_start_time_hour: 3
+      automated_backup_retention_days: 35
+
+      # --- Maintenance Window ---
+      maintenance_day: "SUNDAY"
+      maintenance_start_hour: 4
+
+      # --- Engine ---
+      engine_version: "VALKEY_9_0"
+
+      # --- Engine Configuration Parameters ---
+      maxmemory_policy: "volatile-lru"
+      notify_keyspace_events: ""
+      maxmemory_clients: null
+      slowlog_log_slower_than: 10000
+      maxclients: null
+
+      # --- Deletion Protection ---
+      deletion_protection_enabled: false
+
+  qa:
+    example1:
+      enabled: false ##### Setting this to false for existing resources will destroy them.
+
+  uat:
+    example1:
+      enabled: false ##### Setting this to false for existing resources will destroy them.
+
+  prd:
+    example1:
+      enabled: false ##### Setting this to false for existing resources will destroy them.

@@ -29,3 +29,5 @@ terraform.rc
 # Plan output files
 *.tfplan
 sampleCheck/
+config/tempalte-tfvars.md
+variables.txt

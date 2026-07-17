@@ -228,15 +228,21 @@ variable "psc_connectivity_mode" {
   description = <<-EOT
     How PSC connections to the instance are established.
 
-    AUTO: Memorystore creates the forwarding rule/endpoint for you inside one
-      consumer VPC that you supply. Simplest option, single-VPC access only.
-      Requires a Service Connection Policy authorizing the connection.
+    NONE: No PSC connectivity is configured by this module. The instance is
+      created with no desired_auto_created_endpoints block — nothing can
+      reach it over PSC until connectivity is set up some other way.
 
-    USER: You create the forwarding rule(s) yourself and explicitly register
-      them with the instance. Required when connecting from a VPC in a
-      different project than the instance (the common "host project owns the
-      instance, app projects consume it" pattern), or from multiple VPCs.
-      No Service Connection Policy is used in this mode.
+    SHARED_VPC: The instance attaches to an existing Shared VPC network that
+      is already set up for it — the network (shared_vpc_network_name) and
+      its Service Connection Policy (existing_scp_name, service_class =
+      gcp-memorystore) both already exist, created outside this module (see
+      PreReq-SharedArchitecture.md). This module does not create the VPC or
+      the SCP, and does not create a forwarding rule or reserved IP either —
+      it only points the instance at the network via
+      desired_auto_created_endpoints. Because the SCP is already there and
+      pre-authorizes gcp-memorystore into that network/region, Memorystore
+      auto-creates the PSC endpoint itself the moment the instance is
+      created. No second apply, no manual endpoint registration.
   EOT
   default     = "NONE"
   nullable    = false
