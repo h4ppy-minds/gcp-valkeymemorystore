@@ -454,6 +454,10 @@ check "persistence_config_consistency" {
     condition     = !(var.persistence_mode == "AOF" && var.aof_config == null)
     error_message = "persistence_mode = AOF requires aof_config to be set."
   }
+  assert {
+    condition     = !(var.deployment_topology == "DR" && var.persistence_mode == "RDB" && var.rdb_snapshot_start_time == null)
+    error_message = "deployment_topology = DR with persistence_mode = RDB requires rdb_snapshot_start_time to be an explicit value, not null. Left null, GCP auto-assigns its own timestamp independently to the primary and secondary at creation time, and the two never match — the API then rejects the secondary with \"persistence_config cannot be different from the primary instance\". Confirmed via a real apply failure. Set any fixed RFC3339 timestamp; primary and secondary already receive the identical value from this same variable, so any explicit value fixes it."
+  }
 }
 
 ############################################
