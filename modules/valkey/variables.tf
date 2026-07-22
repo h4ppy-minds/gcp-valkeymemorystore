@@ -5,18 +5,19 @@
 variable "deployment_topology" {
   type        = string
   description = <<-EOT
-    Self-documenting label for what the customer is asking for:
+    The single knob for topology — this is the only input; there is no
+    separate enable_cross_region_replication variable. STANDALONE / HA
+    map 1:1 to no DR; DR maps 1:1 to a SECONDARY instance being created.
+    There was never a real second axis here — DR *is* "has a secondary,"
+    nothing else distinguishes it — so this is now the actual source of
+    truth (see local.enable_cross_region_replication in locals.tf)
+    rather than a label validated for consistency against a separate
+    boolean.
       STANDALONE: single instance, no replicas, no cross-region DR.
       HA: single instance with replica(s) and/or MULTI_ZONE distribution,
         still one region, no cross-region DR.
       DR: adds a SECONDARY instance in a second region, replicating from
-        this instance (which becomes PRIMARY).
-
-    This variable does NOT silently override replica_count /
-    enable_cross_region_replication — it's validated for consistency
-    against them (see the check block below) so the module's actual
-    behavior stays fully explained by its explicit variables, while still
-    giving you one clear knob to talk through with the customer.
+        this instance (which becomes PRIMARY). Requires secondary_location.
   EOT
   default     = "STANDALONE"
   nullable    = false
@@ -27,16 +28,9 @@ variable "deployment_topology" {
   }
 }
 
-variable "enable_cross_region_replication" {
-  type        = bool
-  description = "Whether to provision a SECONDARY instance in another region for DR. Set true only for deployment_topology = DR."
-  default     = false
-  nullable    = false
-}
-
 variable "secondary_location" {
   type        = string
-  description = "GCP region for the SECONDARY instance. Required when enable_cross_region_replication = true. Must differ from location."
+  description = "GCP region for the SECONDARY instance. Required when deployment_topology = DR. Must differ from location."
   default     = null
   nullable    = true
 
@@ -46,25 +40,21 @@ variable "secondary_location" {
   }
 }
 
-check "deployment_topology_consistency" {
+check "deployment_topology_replica_count" {
   assert {
-    condition     = var.deployment_topology != "STANDALONE" || (var.replica_count == 0 && !var.enable_cross_region_replication)
-    error_message = "deployment_topology = STANDALONE requires replica_count = 0 and enable_cross_region_replication = false."
+    condition     = var.deployment_topology != "STANDALONE" || var.replica_count == 0
+    error_message = "deployment_topology = STANDALONE requires replica_count = 0."
   }
   assert {
-    condition     = var.deployment_topology != "HA" || (var.replica_count >= 1 && !var.enable_cross_region_replication)
-    error_message = "deployment_topology = HA requires replica_count >= 1 and enable_cross_region_replication = false. (MULTI_ZONE zone_distribution_mode is also recommended for HA, but not enforced here.)"
-  }
-  assert {
-    condition     = var.deployment_topology != "DR" || var.enable_cross_region_replication
-    error_message = "deployment_topology = DR requires enable_cross_region_replication = true."
+    condition     = var.deployment_topology == "STANDALONE" || var.replica_count >= 1
+    error_message = "deployment_topology = HA or DR requires replica_count >= 1. (MULTI_ZONE zone_distribution_mode is also recommended for HA/DR, but not enforced here.)"
   }
 }
 
 check "dr_requires_secondary_location" {
   assert {
-    condition     = !var.enable_cross_region_replication || var.secondary_location != null
-    error_message = "enable_cross_region_replication = true requires secondary_location to be set."
+    condition     = var.deployment_topology != "DR" || var.secondary_location != null
+    error_message = "deployment_topology = DR requires secondary_location to be set."
   }
 }
 
@@ -101,6 +91,12 @@ variable "instance_id" {
     condition     = can(regex("^[a-z][a-z0-9-]{0,61}[a-z0-9]$", var.instance_id))
     error_message = "instance_id must start with a lowercase letter, use only lowercase letters/numbers/hyphens, and be 2-63 characters."
   }
+}
+
+variable "labels" {
+  type        = map(string)
+  description = "Resource labels for cost allocation/ownership tracking (e.g. { env = \"dev\", managed_by = \"terraform\" }). Non-authoritative — Memorystore only manages the labels present in this map, so labels added out-of-band (console/gcloud) are left alone. Applied identically to both the primary and secondary (DR) instance."
+  default     = {}
 }
 
 ############################################
@@ -254,20 +250,13 @@ variable "shared_vpc_network_name" {
   type    = string
   default = null
 }
-variable "existing_scp_name" {
-  type        = string
-  description = "Name of the pre-existing Service Connection Policy (service_class = gcp-memorystore) that authorizes this connection. NOT wired into any resource or data source — the google provider has no read-only data source for Service Connection Policies, so this cannot be verified by Terraform. It exists purely so a caller in SHARED_VPC mode must explicitly name the policy they're relying on, as a documentation/handoff guardrail. Confirm it out-of-band with `gcloud network-connectivity service-connection-policies describe` before applying."
-  default     = null
-}
-
 check "shared_vpc_inputs_present" {
   assert {
     condition = var.psc_connectivity_mode != "SHARED_VPC" || (
       var.shared_vpc_host_project != null &&
-      var.shared_vpc_network_name != null &&
-      var.existing_scp_name != null
+      var.shared_vpc_network_name != null
     )
-    error_message = "psc_connectivity_mode = SHARED_VPC requires shared_vpc_host_project, shared_vpc_network_name, and existing_scp_name."
+    error_message = "psc_connectivity_mode = SHARED_VPC requires shared_vpc_host_project and shared_vpc_network_name."
   }
 }
 

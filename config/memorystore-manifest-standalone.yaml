@@ -1,16 +1,15 @@
-dpe:
+valkey:
   dev:
     example1:
       enabled: true ##### Setting this to false for existing resources will destroy them.
 
-      # --- Deployment Topology & DR ---
       deployment_topology: "STANDALONE"
-      enable_cross_region_replication: false
       secondary_location: null
 
       # --- Core Identity ---
+      # consumer_project_id removed — the module never had a variable by
+      # that name; it was dead data that was never passed anywhere.
       project_id: "valkeyhubhost-500604"
-      consumer_project_id: null # null = same as project_id (same-project deployment)
       environment: "DEV"
       instance_id: "dpe-valkey-standalone"
 
@@ -18,7 +17,7 @@ dpe:
       location: "us-east1"
       zone_distribution_mode: "MULTI_ZONE"
       zone: null # must be null when MULTI_ZONE
-      secondary_zone: null # only used when enable_cross_region_replication = true
+      secondary_zone: null # only used when deployment_topology = DR
 
       # --- Cluster Topology & Sizing ---
       cluster_mode: "CLUSTER_DISABLED"
@@ -30,15 +29,20 @@ dpe:
       psc_connectivity_mode: "NONE"
       shared_vpc_host_project: null
       shared_vpc_network_name: null
-      existing_scp_name: null
 
       # --- Authorization & TLS ---
+      # AUTH_DISABLED + TRANSIT_ENCRYPTION_DISABLED passes the module's
+      # validation (TLS is only required when authorization_mode =
+      # IAM_AUTH) but means anyone on the authorized network can connect
+      # with no authentication and no encryption in transit. Fine for a
+      # throwaway dev sandbox; flag before this pattern spreads to
+      # qa/uat/prd.
       authorization_mode: "AUTH_DISABLED"
-      transit_encryption_mode: "TRANSIT_ENCRYPTION_DISABLED" # required since authorization_mode = IAM_AUTH
+      transit_encryption_mode: "TRANSIT_ENCRYPTION_DISABLED"
 
       # --- Certificate Authority ---
       server_ca_mode: "GOOGLE_MANAGED_PER_INSTANCE_CA"
-      server_ca_pool: null # only used when server_ca_mode = CUSTOMER_MANAGED_CAS_CA
+      server_ca_pool: null # only used when server_ca_mode = CUSTOMER_MANAGED_CA
 
       # --- Encryption at Rest ---
       encryption_type: "GOOGLE_MANAGED"
@@ -69,8 +73,9 @@ dpe:
       slowlog_log_slower_than: 10000
       maxclients: null
 
-      # --- Deletion Protection ---
+      # --- Deletion Protection & Labels ---
       deletion_protection_enabled: false
+      labels: { env: "dev", managed_by: "terraform", service: "valkey" }
 
   qa:
     example1:

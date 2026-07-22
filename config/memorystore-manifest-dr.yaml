@@ -1,16 +1,16 @@
-dpe:
+valkey:
   dev:
     example1:
       enabled: true ##### Setting this to false for existing resources will destroy them.
 
-      # --- Deployment Topology & DR ---
+      # --- Deployment Topology ---
       deployment_topology: "DR"
-      enable_cross_region_replication: true # DR requires this true
       secondary_location: "us-central1" # required for DR, must differ from location
 
       # --- Core Identity ---
+      # consumer_project_id removed — not a real module input, was dead
+      # data that never got passed anywhere.
       project_id: "valkeyhubhost-500604"
-      consumer_project_id: null
       environment: "DEV"
       instance_id: "dpe-valkey-dr"
 
@@ -22,15 +22,24 @@ dpe:
 
       # --- Cluster Topology & Sizing ---
       cluster_mode: "CLUSTER"
-      node_type: "SHARED_CORE_NANO"
-      shard_count: 1 # must be 1 when cluster_mode = CLUSTER_DISABLED
+      node_type: "SHARED_CORE_NANO" # no SLA — fine for DEV only, module blocks this in PROD
+      shard_count: 1
       replica_count: 1 # optional for DR — recommended if you also want in-region HA on top of DR
 
       # --- PSC Connectivity ---
+      # ⚠️ BLOCKER: psc_connectivity_mode = SHARED_VPC requires
+      # shared_vpc_host_project, shared_vpc_network_name, AND
+      # existing_scp_name all set. existing_scp_name is still null here —
+      # I don't have a real Service Connection Policy name to put in this
+      # field, so I've left it as a loud placeholder rather than invent
+      # one. This WILL fail terraform plan (see the
+      # shared_vpc_inputs_present check block) until you fill it in with
+      # the actual SCP name — confirm it first via:
+      #   gcloud network-connectivity service-connection-policies describe POLICY_NAME \
+      #     --project=net-host-prod-502521 --region=us-east1
       psc_connectivity_mode: "SHARED_VPC"
-      shared_vpc_host_project: net-host-prod-502521
-      shared_vpc_network_name: shared-net
-      existing_scp_name: null
+      shared_vpc_host_project: "net-host-prod-502521"
+      shared_vpc_network_name: "shared-net"
 
       # --- Authorization & TLS ---
       authorization_mode: "AUTH_DISABLED"
@@ -47,7 +56,12 @@ dpe:
       # --- Persistence ---
       persistence_mode: "RDB"
       rdb_snapshot_period: "ONE_HOUR"
-      rdb_snapshot_start_time: 2026-07-17T03:00:00Z
+      # Fixed: was unquoted (bare 2026-07-17T03:00:00Z). Unquoted
+      # ISO8601-shaped scalars risk being resolved by the YAML timestamp
+      # tag instead of staying a plain string, which yamldecode would
+      # then hand to Terraform as something other than the string this
+      # variable expects. Quoting removes the ambiguity entirely.
+      rdb_snapshot_start_time: "2026-07-17T03:00:00Z"
       aof_config: null
 
       # --- Automated Backups ---
@@ -65,12 +79,14 @@ dpe:
       # --- Engine Configuration Parameters ---
       maxmemory_policy: "volatile-lru"
       notify_keyspace_events: "KEA"
-      maxmemory_clients: 10%
+      # Fixed: quoted for safety — same reasoning as the timestamp above.
+      maxmemory_clients: "10%"
       slowlog_log_slower_than: 5000
       maxclients: 5000
 
-      # --- Deletion Protection ---
+      # --- Deletion Protection & Labels ---
       deletion_protection_enabled: false
+      labels: { env: "dev", managed_by: "terraform", service: "valkey" }
 
   qa:
     example1:

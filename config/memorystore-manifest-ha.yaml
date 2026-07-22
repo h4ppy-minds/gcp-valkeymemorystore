@@ -1,16 +1,14 @@
-dpe:
+valkey:
   dev:
     example1:
       enabled: true ##### Setting this to false for existing resources will destroy them.
 
-      # --- Deployment Topology & DR ---
       deployment_topology: "HA"
-      enable_cross_region_replication: false # HA requires this false (single region)
       secondary_location: null
 
       # --- Core Identity ---
+      # consumer_project_id removed — not a real module input.
       project_id: "valkeyhubhost-500604"
-      consumer_project_id: null
       environment: "DEV"
       instance_id: "dpe-valkey-ha"
 
@@ -30,7 +28,6 @@ dpe:
       psc_connectivity_mode: "NONE"
       shared_vpc_host_project: null
       shared_vpc_network_name: null
-      existing_scp_name: null
 
       # --- Authorization & TLS ---
       authorization_mode: "AUTH_DISABLED"
@@ -69,8 +66,9 @@ dpe:
       slowlog_log_slower_than: 10000
       maxclients: null
 
-      # --- Deletion Protection ---
+      # --- Deletion Protection & Labels ---
       deletion_protection_enabled: false
+      labels: { env: "dev", managed_by: "terraform", service: "valkey" }
 
   qa:
     example1:

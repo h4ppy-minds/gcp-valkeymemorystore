@@ -1,23 +1,20 @@
-
 # Root main.tf — this is the file customers/callers actually edit values
-# for (via a tfvars file). All logic lives in modules/valkey/; this just
-# wires inputs through.
+# for (via the YAML manifest in config/). All logic lives in
+# modules/memorystore-valkey/; this just wires inputs through.
 
 module "valkey" {
   source = "./modules/valkey" # Replace with actual module source
   #version  = "1.0.0"            # Pin to the module version you're using
   for_each = local.enabled_configs
 
-  # --- Deployment Topology & DR ---
-  deployment_topology             = each.value.deployment_topology
-  enable_cross_region_replication = each.value.enable_cross_region_replication
-  secondary_location              = each.value.secondary_location
+  # --- Deployment Topology & DR ---  
+  deployment_topology = each.value.deployment_topology
+  secondary_location  = each.value.secondary_location
 
-  # --- Core Identity ---
-  project_id          = local.provider_project_id
-  consumer_project_id = each.value.consumer_project_id
-  environment         = each.value.environment
-  instance_id         = each.value.instance_id
+
+  project_id  = each.value.project_id
+  environment = each.value.environment
+  instance_id = each.value.instance_id
 
   # --- Region / Zone ---
   location               = each.value.location
@@ -35,7 +32,6 @@ module "valkey" {
   psc_connectivity_mode   = each.value.psc_connectivity_mode
   shared_vpc_host_project = each.value.shared_vpc_host_project
   shared_vpc_network_name = each.value.shared_vpc_network_name
-  existing_scp_name       = each.value.existing_scp_name
 
   # --- Authorization & TLS ---
   authorization_mode      = each.value.authorization_mode
@@ -74,92 +70,44 @@ module "valkey" {
   slowlog_log_slower_than = each.value.slowlog_log_slower_than
   maxclients              = each.value.maxclients
 
-  # --- Deletion Protection ---
+  # --- Deletion Protection & Labels --- 
   deletion_protection_enabled = each.value.deletion_protection_enabled
+  labels                      = each.value.labels
 }
 
-
-# module "valkey" {
-#   source = "./modules/valkey"
-
-#   project_id          = var.project_id
-#   consumer_project_id = var.consumer_project_id
-#   environment         = var.environment
-#   instance_id         = var.instance_id
-
-#   location               = var.location
-#   zone_distribution_mode = var.zone_distribution_mode
-#   zone                   = var.zone
-
-#   deployment_topology             = var.deployment_topology
-#   enable_cross_region_replication = var.enable_cross_region_replication
-#   secondary_location              = var.secondary_location
-#   secondary_zone                  = var.secondary_zone
-
-#   cluster_mode  = var.cluster_mode
-#   node_type     = var.node_type
-#   shard_count   = var.shard_count
-#   replica_count = var.replica_count
-
-#   psc_connectivity_mode   = var.psc_connectivity_mode
-#   shared_vpc_host_project = var.shared_vpc_host_project
-#   shared_vpc_network_name = var.shared_vpc_network_name
-#   existing_scp_name       = var.existing_scp_name
-
-#   authorization_mode      = var.authorization_mode
-#   transit_encryption_mode = var.transit_encryption_mode
-
-#   server_ca_mode = var.server_ca_mode
-#   server_ca_pool = var.server_ca_pool
-
-#   encryption_type = var.encryption_type
-#   kms_key         = var.kms_key
-
-#   persistence_mode        = var.persistence_mode
-#   rdb_snapshot_period     = var.rdb_snapshot_period
-#   rdb_snapshot_start_time = var.rdb_snapshot_start_time
-#   aof_config              = var.aof_config
-
-#   automated_backup_enabled         = var.automated_backup_enabled
-#   automated_backup_start_time_hour = var.automated_backup_start_time_hour
-#   automated_backup_retention_days  = var.automated_backup_retention_days
-
-#   maintenance_day        = var.maintenance_day
-#   maintenance_start_hour = var.maintenance_start_hour
-
-#   engine_version          = var.engine_version
-#   maxmemory_policy        = var.maxmemory_policy
-#   notify_keyspace_events  = var.notify_keyspace_events
-#   maxmemory_clients       = var.maxmemory_clients
-#   slowlog_log_slower_than = var.slowlog_log_slower_than
-#   maxclients              = var.maxclients
-
-#   deletion_protection_enabled = var.deletion_protection_enabled
-# }
+# --- Alerts, per instance (optional) ---
+# Uncomment to wire up modules/valkey-alerts for every enabled instance.
+# Fixed vs. the earlier draft: service_project_id/service_team_* renamed
+# to requester_* (the alerts module's data-plane-connect design changed —
+# see its README), memory_warning/critical_threshold added,
+# rejected_connections split into warning/critical, replica_count and the
+# two log-based-alert toggles added. Uses variables that don't exist yet
+# in variables.tf — add them (or hardcode per-manifest values under
+# each.value, same pattern as module.valkey above) before uncommenting.
+#
 # module "valkey_alerts" {
-#   source = "./modules/valkey-alerts-module"
-
-#   project_id  = var.project_id
-#   instance_id = module.valkey.instance_id
-#   region      = var.location
-
-#   # Service team is in a different project — omit this if they share yours
-#   service_project_id = var.service_project_id
-
-#   platform_critical_emails     = var.platform_critical_emails
-#   platform_warning_emails      = var.platform_warning_emails
-#   service_team_critical_emails = var.service_team_critical_emails
-#   service_team_warning_emails  = var.service_team_warning_emails
-
-#   # Optional — override defaults if your workload's baseline differs
-#   cpu_warning_threshold               = var.cpu_warning_threshold
-#   cpu_critical_threshold              = var.cpu_critical_threshold
-#   memory_warning_threshold            = var.memory_warning_threshold
-#   memory_critical_threshold           = var.memory_critical_threshold
-#   rejected_connections_threshold      = var.rejected_connections_threshold
-#   connected_clients_warning_threshold = var.connected_clients_warning_threshold
-#   replication_lag_warning_bytes       = var.replication_lag_warning_bytes
-#   critical_alignment_period           = var.critical_alignment_period
-#   warning_duration                    = var.warning_duration
-#   critical_auto_close                 = var.critical_auto_close
+#   source   = "./modules/valkey-alerts"
+#   for_each = local.enabled_configs
+#
+#   project_id    = each.value.project_id
+#   instance_id   = module.valkey[each.key].instance_id
+#   region        = each.value.location
+#   replica_count = each.value.replica_count
+#
+#   requester_critical_emails = var.requester_critical_emails
+#   requester_warning_emails  = var.requester_warning_emails
+#   platform_critical_emails  = var.platform_critical_emails
+#   platform_warning_emails   = var.platform_warning_emails
+#
+#   cpu_warning_threshold                   = var.cpu_warning_threshold
+#   cpu_critical_threshold                  = var.cpu_critical_threshold
+#   memory_warning_threshold                = var.memory_warning_threshold
+#   memory_critical_threshold               = var.memory_critical_threshold
+#   rejected_connections_warning_threshold  = var.rejected_connections_warning_threshold
+#   rejected_connections_critical_threshold = var.rejected_connections_critical_threshold
+#   connected_clients_warning_threshold     = var.connected_clients_warning_threshold
+#   replication_lag_warning_bytes           = var.replication_lag_warning_bytes
+#
+#   enable_admin_activity_alerts = true
+#   enable_system_event_alerts   = true
 # }

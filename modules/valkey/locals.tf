@@ -1,5 +1,10 @@
 locals {
 
+  # Single source of truth: DR *is* "has a secondary instance," nothing
+  # else distinguishes it. Derived rather than a separate variable so
+  # there's no possibility of the two disagreeing.
+  enable_cross_region_replication = var.deployment_topology == "DR"
+
   # --- Zone resolution for SINGLE_ZONE mode ---
   effective_zone = var.zone_distribution_mode == "SINGLE_ZONE" ? coalesce(
     var.zone,
@@ -28,14 +33,14 @@ locals {
 
   # --- DR: secondary instance zone/location resolution ---
   effective_secondary_zone = (
-    var.enable_cross_region_replication && var.zone_distribution_mode == "SINGLE_ZONE"
+    local.enable_cross_region_replication && var.zone_distribution_mode == "SINGLE_ZONE"
     ) ? coalesce(
     var.secondary_zone,
     try(data.google_compute_zones.available_secondary_zones[0].names[0], null)
   ) : null
 
   valid_secondary_location = (
-    !var.enable_cross_region_replication ||
+    !local.enable_cross_region_replication ||
     contains(data.google_compute_regions.available_regions.names, var.secondary_location)
   )
 

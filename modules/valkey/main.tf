@@ -1,8 +1,19 @@
 ############################################
-# Memorystore for Valkey — primary instance
+# Memorystore for Valkey — primary + optional DR secondary
 #
-# Lives in var.project_id. Network connectivity is controlled by
-# var.psc_connectivity_mode:
+# Both instances are the SAME underlying resource (./modules/_instance),
+# called twice. Primary and secondary aren't symmetric — different
+# location, and the secondary's replication config points at the
+# primary's id — so this stays two explicit call sites rather than one
+# for_each over both (which would mean one instance of a for_each
+# referencing a sibling key of the same for_each — legal in Terraform,
+# but a needless source of confusing dependency-graph behavior for a
+# relationship that's inherently asymmetric anyway). What WAS wrong
+# before this refactor was two ~150-line hand-duplicated resource
+# blocks; that duplication now lives in exactly one place
+# (modules/_instance/main.tf).
+#
+# Network connectivity is controlled by var.psc_connectivity_mode:
 #   NONE        — no endpoint block; nothing can reach the instance over
 #                 PSC until wired up some other way, outside this module.
 #   SHARED_VPC  — points the instance at an already-existing Shared VPC
@@ -11,204 +22,95 @@
 #                 shared_vpc_* / existing_scp_name variables). Memorystore
 #                 auto-creates the PSC endpoint itself; no second apply.
 #
-# Topology: var.deployment_topology (STANDALONE / HA / DR) is a
-# self-documenting label validated for consistency against
-# replica_count / enable_cross_region_replication (see the check block in
-# variables.tf) — it does not silently override those variables. This
-# keeps the module's actual behavior fully explained by its explicit
-# variables, while still giving callers/customers a single clear knob to
-# talk about ("we want DR") that maps to a validated combination.
+# Topology: var.deployment_topology (STANDALONE / HA / DR) is the single
+# source of truth — local.enable_cross_region_replication (locals.tf) is
+# derived from it (true iff deployment_topology == "DR"), not a separate
+# variable. replica_count is still validated for consistency against
+# deployment_topology (see the check block in variables.tf), since that's
+# a real independent magnitude, not something the topology label implies
+# a single value for.
 ############################################
 
-resource "google_memorystore_instance" "primary-instance" {
+module "primary" {
+  source = "./module/_instance"
 
-  # --- Identity ---
-  project     = var.project_id
-  instance_id = var.instance_id
+  project_id             = var.project_id
+  instance_id            = var.instance_id
+  location               = var.location
+  zone_distribution_mode = var.zone_distribution_mode
+  effective_zone         = local.effective_zone
+  cluster_mode           = var.cluster_mode
+  node_type              = var.node_type
+  shard_count            = var.shard_count
+  replica_count          = var.replica_count
 
-  # --- Region and zonal availability ---
-  location = var.location
+  # Confirmed via a real apply error: "Invalid cross instance replication
+  # role PRIMARY. Allowed value is: SECONDARY" — the primary never
+  # declares a role itself; it becomes PRIMARY implicitly once a
+  # secondary's cross_instance_replication_config.primary_instance points
+  # at it (below). This resolves the "unverified" DR-pairing caveat that
+  # used to be in the README: the answer is "the primary needs no block
+  # at all," not "the primary needs instance_role = PRIMARY."
+  instance_role       = "NONE"
+  primary_instance_id = null
 
-  zone_distribution_config {
-    mode = var.zone_distribution_mode
-    zone = local.effective_zone
-  }
+  psc_connectivity_mode    = var.psc_connectivity_mode
+  effective_psc_network_id = local.effective_psc_network_id
 
-  # --- Cluster mode (Enabled/Disabled) ---
-  mode = var.cluster_mode
-
-  # --- Size / topology ---
-  node_type     = var.node_type
-  shard_count   = var.shard_count
-  replica_count = var.replica_count
-
-  # --- Cross-region replication role ---
-  # NONE for STANDALONE/HA.
-  # --- Network endpoint (AUTO mode only) ---
-  # In USER mode, the instance is created with NO endpoint block at all.
-  # The connection is created and registered afterward via the separate
-  # google_memorystore_instance_desired_user_created_endpoints resource
-  # in psc_network.tf, once the instance (and its service attachments)
-  # exist. See README.md for the two-phase apply this requires.
-  dynamic "desired_auto_created_endpoints" {
-    for_each = var.psc_connectivity_mode == "SHARED_VPC" ? [1] : []
-    content {
-      network    = local.effective_psc_network_id
-      project_id = var.project_id
-    }
-  }
-
-  # --- Authorization (AUTH) & TLS ---
   authorization_mode      = var.authorization_mode
   transit_encryption_mode = var.transit_encryption_mode
+  server_ca_mode          = var.server_ca_mode
+  server_ca_pool          = var.server_ca_mode == "CUSTOMER_MANAGED_CAS_CA" ? var.server_ca_pool : null
+  kms_key                 = var.encryption_type == "CUSTOMER_MANAGED" ? var.kms_key : null
 
-  # --- Certificate Authority management ---
-  server_ca_mode = var.server_ca_mode
-  server_ca_pool = var.server_ca_mode == "CUSTOMER_MANAGED_CAS_CA" ? var.server_ca_pool : null
+  persistence_mode                 = var.persistence_mode
+  rdb_snapshot_period              = var.rdb_snapshot_period
+  rdb_snapshot_start_time          = var.rdb_snapshot_start_time
+  aof_config                       = var.aof_config
+  automated_backup_enabled         = var.automated_backup_enabled
+  automated_backup_start_time_hour = var.automated_backup_start_time_hour
+  automated_backup_retention_days  = var.automated_backup_retention_days
+  maintenance_day                  = var.maintenance_day
+  maintenance_start_hour           = var.maintenance_start_hour
 
-  # --- Encryption at rest (CMEK) ---
-  kms_key = var.encryption_type == "CUSTOMER_MANAGED" ? var.kms_key : null
+  engine_version          = var.engine_version
+  maxmemory_policy        = var.maxmemory_policy
+  notify_keyspace_events  = var.notify_keyspace_events
+  maxmemory_clients       = var.maxmemory_clients
+  slowlog_log_slower_than = var.slowlog_log_slower_than
+  maxclients              = var.maxclients
 
-  # --- Persistence (RDB / AOF / disabled) ---
-  persistence_config {
-    mode = var.persistence_mode
-
-    dynamic "rdb_config" {
-      for_each = var.persistence_mode == "RDB" ? [1] : []
-      content {
-        rdb_snapshot_period     = var.rdb_snapshot_period
-        rdb_snapshot_start_time = var.rdb_snapshot_start_time
-      }
-    }
-
-    dynamic "aof_config" {
-      for_each = var.persistence_mode == "AOF" ? [1] : []
-      content {
-        append_fsync = var.aof_config.append_fsync
-      }
-    }
-  }
-
-  # --- Automated backups (separate from persistence — GCS-backed collection) ---
-  dynamic "automated_backup_config" {
-    for_each = var.automated_backup_enabled ? [1] : []
-    content {
-      fixed_frequency_schedule {
-        start_time {
-          hours = var.automated_backup_start_time_hour
-        }
-      }
-      retention = "${var.automated_backup_retention_days * 86400}s"
-    }
-  }
-
-  # --- Maintenance window ---
-  maintenance_policy {
-    weekly_maintenance_window {
-      day = var.maintenance_day
-      start_time {
-        hours   = var.maintenance_start_hour
-        minutes = 0
-        seconds = 0
-        nanos   = 0
-      }
-    }
-  }
-
-  # --- Engine version & configuration parameters ---
-  engine_version = var.engine_version
-
-  engine_configs = merge(
-    {
-      "maxmemory-policy"       = var.maxmemory_policy
-      "notify-keyspace-events" = var.notify_keyspace_events
-    },
-    var.maxmemory_clients != null ? { "maxmemory-clients" = var.maxmemory_clients } : {},
-    var.slowlog_log_slower_than != null ? { "slowlog-log-slower-than" = tostring(var.slowlog_log_slower_than) } : {},
-    var.maxclients != null ? { "maxclients" = tostring(var.maxclients) } : {}
-  )
-
-  # --- Deletion protection ---
-  # This is the real, API-enforced guard (blocks delete via console/gcloud/
-  # API too, not just `terraform destroy`). lifecycle.prevent_destroy is
-  # intentionally NOT used here — it cannot reference variables (must be a
-  # literal bool), which would defeat the point of a reusable module.
   deletion_protection_enabled = var.deletion_protection_enabled
+  labels                      = var.labels
 
-  lifecycle {
-    precondition {
-      condition     = local.valid_location
-      error_message = "location '${var.location}' is not available for project '${var.project_id}'."
-    }
-
-    precondition {
-      condition     = local.valid_zone_for_single_zone_mode
-      error_message = "Could not resolve a valid zone for SINGLE_ZONE mode in region '${var.location}' for project '${var.project_id}'. Either no zones are available, or the supplied zone '${var.zone_distribution_mode}' is invalid."
-    }
-
-    precondition {
-      condition     = local.valid_shard_count_for_cluster_mode
-      error_message = "shard_count must be 1 when cluster_mode is 'CLUSTER_DISABLED'; Cluster Mode Disabled instances only support a single shard."
-    }
-
-    precondition {
-      condition     = local.valid_node_type_for_prod
-      error_message = "SHARED_CORE_NANO has no SLA and is not recommended for production. Use STANDARD_SMALL, HIGHMEM_MEDIUM, or HIGHMEM_XLARGE for environment = 'PROD'."
-    }
-
-    precondition {
-      condition     = local.valid_custom_node_type_requires_cluster_disabled
-      error_message = "node_type '${var.node_type}' (CUSTOM_PICO/CUSTOM_MICRO/CUSTOM_MINI) is only available for Cluster Mode Disabled instances. Set cluster_mode = 'CLUSTER_DISABLED', or choose a different node_type for cluster_mode = 'CLUSTER'."
-    }
-
-    precondition {
-      condition     = local.valid_iam_auth_requires_tls
-      error_message = "IAM_AUTH sends the AUTH token unencrypted unless in-transit encryption is enabled. Set transit_encryption_mode = 'SERVER_AUTHENTICATION' when using authorization_mode = 'IAM_AUTH'."
-    }
-  }
+  valid_location                                   = local.valid_location
+  valid_zone_for_single_zone_mode                  = local.valid_zone_for_single_zone_mode
+  valid_shard_count_for_cluster_mode               = local.valid_shard_count_for_cluster_mode
+  valid_node_type_for_prod                         = local.valid_node_type_for_prod
+  valid_custom_node_type_requires_cluster_disabled = local.valid_custom_node_type_requires_cluster_disabled
+  valid_iam_auth_requires_tls                      = local.valid_iam_auth_requires_tls
 }
 
-############################################
-# Memorystore for Valkey — secondary instance (DR only)
-#
-# Created only when var.enable_cross_region_replication = true. Mirrors
-# the primary's engine/persistence/auth/TLS settings — cross-instance
-# replication does not support mismatched configuration between the two.
-# This resource has its own full PSC networking stack in
-# psc_network.tf (everything suffixed _secondary), since PSC connections
-# are strictly regional and the secondary lives in a different region.
-############################################
+module "secondary" {
+  count  = local.enable_cross_region_replication ? 1 : 0
+  source = "./module/_instance"
 
-resource "google_memorystore_instance" "secondary" {
-  count = var.enable_cross_region_replication ? 1 : 0
+  project_id             = var.project_id
+  instance_id            = "${var.instance_id}-dr"
+  location               = var.secondary_location
+  zone_distribution_mode = var.zone_distribution_mode
+  effective_zone         = local.effective_secondary_zone
+  cluster_mode           = var.cluster_mode
+  node_type              = var.node_type
+  shard_count            = var.shard_count
+  replica_count          = var.replica_count
 
-  project     = var.project_id
-  instance_id = "${var.instance_id}-dr"
-  location    = var.secondary_location
+  instance_role       = "SECONDARY"
+  primary_instance_id = module.primary.id
 
-  zone_distribution_config {
-    mode = var.zone_distribution_mode
-    zone = local.effective_secondary_zone
-  }
+  psc_connectivity_mode    = var.psc_connectivity_mode
+  effective_psc_network_id = local.effective_psc_network_id
 
-  mode          = var.cluster_mode
-  node_type     = var.node_type
-  shard_count   = var.shard_count
-  replica_count = var.replica_count
-
-  cross_instance_replication_config {
-    instance_role = "SECONDARY"
-    primary_instance {
-      instance = google_memorystore_instance.primary-instance.id
-    }
-  }
-  dynamic "desired_auto_created_endpoints" {
-    for_each = var.psc_connectivity_mode == "SHARED_VPC" ? [1] : []
-    content {
-      network    = local.effective_psc_network_id
-      project_id = var.project_id
-    }
-  }
   # Must match the primary — cross-instance replication requires
   # consistent auth/TLS/CA/engine settings between the two.
   authorization_mode      = var.authorization_mode
@@ -216,54 +118,33 @@ resource "google_memorystore_instance" "secondary" {
   server_ca_mode          = var.server_ca_mode
   server_ca_pool          = var.server_ca_mode == "CUSTOMER_MANAGED_CAS_CA" ? var.server_ca_pool : null
   kms_key                 = var.encryption_type == "CUSTOMER_MANAGED" ? var.kms_key : null
+
+  persistence_mode        = var.persistence_mode
+  rdb_snapshot_period     = var.rdb_snapshot_period
+  rdb_snapshot_start_time = var.rdb_snapshot_start_time
+  aof_config              = var.aof_config
+  # Preserved as-is from the original hand-written resource: the
+  # secondary never got automated_backup_config, regardless of
+  # var.automated_backup_enabled. That may well have been an oversight
+  # rather than a deliberate choice — worth deciding explicitly rather
+  # than carrying it forward silently forever. Flagged in the README.
+  automated_backup_enabled = false
+  maintenance_day          = var.maintenance_day
+  maintenance_start_hour   = var.maintenance_start_hour
+
   engine_version          = var.engine_version
-  engine_configs = merge(
-    {
-      "maxmemory-policy"       = var.maxmemory_policy
-      "notify-keyspace-events" = var.notify_keyspace_events
-    },
-    var.maxmemory_clients != null ? { "maxmemory-clients" = var.maxmemory_clients } : {},
-    var.slowlog_log_slower_than != null ? { "slowlog-log-slower-than" = tostring(var.slowlog_log_slower_than) } : {},
-    var.maxclients != null ? { "maxclients" = tostring(var.maxclients) } : {}
-  )
-
-  persistence_config {
-    mode = var.persistence_mode
-
-    dynamic "rdb_config" {
-      for_each = var.persistence_mode == "RDB" ? [1] : []
-      content {
-        rdb_snapshot_period     = var.rdb_snapshot_period
-        rdb_snapshot_start_time = var.rdb_snapshot_start_time
-      }
-    }
-
-    dynamic "aof_config" {
-      for_each = var.persistence_mode == "AOF" ? [1] : []
-      content {
-        append_fsync = var.aof_config.append_fsync
-      }
-    }
-  }
-
-  maintenance_policy {
-    weekly_maintenance_window {
-      day = var.maintenance_day
-      start_time {
-        hours   = var.maintenance_start_hour
-        minutes = 0
-        seconds = 0
-        nanos   = 0
-      }
-    }
-  }
+  maxmemory_policy        = var.maxmemory_policy
+  notify_keyspace_events  = var.notify_keyspace_events
+  maxmemory_clients       = var.maxmemory_clients
+  slowlog_log_slower_than = var.slowlog_log_slower_than
+  maxclients              = var.maxclients
 
   deletion_protection_enabled = var.deletion_protection_enabled
+  labels                      = var.labels
 
-  lifecycle {
-    precondition {
-      condition     = local.valid_secondary_location
-      error_message = "secondary_location '${var.secondary_location}' is not available for project '${var.project_id}'."
-    }
-  }
+  # Only the secondary's own location gets (re-)checked — shard_count/
+  # node_type/cluster_mode/authorization_mode are the exact same
+  # variables the primary already validated, so re-asserting them here
+  # would just duplicate the same check against identical inputs.
+  valid_location = local.valid_secondary_location
 }

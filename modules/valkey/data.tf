@@ -21,16 +21,12 @@ data "google_project" "host_project" {
 # (DR) instance when zone_distribution_mode = SINGLE_ZONE. Only queried
 # when cross-region replication is actually enabled.
 data "google_compute_zones" "available_secondary_zones" {
-  count   = var.enable_cross_region_replication ? 1 : 0
+  count   = local.enable_cross_region_replication ? 1 : 0
   project = var.project_id
   region  = var.secondary_location
 }
 
-# Only the shared VPC network itself is looked up here. The Service
-# Connection Policy that must already exist on this network (var.existing_scp_name)
-# is NOT looked up or verified anywhere in this module — the google provider
-# has no read-only data source for it. See the existing_scp_name variable in
-# variables.tf for the manual gcloud command to confirm it before applying.
+# Only the shared VPC network itself is looked up here. 
 data "google_compute_network" "shared_vpc_net" {
   count   = var.psc_connectivity_mode == "SHARED_VPC" ? 1 : 0
   project = var.shared_vpc_host_project
