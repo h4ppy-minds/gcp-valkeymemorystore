@@ -149,25 +149,31 @@ resource "google_monitoring_alert_policy" "memory_critical" {
 }
 
 ############################################
-# WARNING — Rejected connections rising
+# Rejected connections — WARNING and CRITICAL
+#
+# WARNING: any sustained rejection is worth a look. CRITICAL: this is
+# client-visible connection failures, sustained and high — treated with
+# the same two-tier pattern as CPU/memory rather than warning-only,
+# since it means real requests are failing right now, not just trending
+# toward a problem.
 ############################################
 
-resource "google_monitoring_alert_policy" "rejected_connections" {
+resource "google_monitoring_alert_policy" "rejected_connections_warning" {
   project      = var.project_id
   display_name = "[WARNING][${var.region}] Valkey rejected connections detected"
   combiner     = "OR"
   severity     = "WARNING"
 
   conditions {
-    display_name = "rejected_connections_count > ${var.rejected_connections_threshold}"
+    display_name = "rejected_connections_count > ${var.rejected_connections_warning_threshold}"
     condition_threshold {
       filter          = "resource.type=\"memorystore_instance\" AND resource.labels.instance_id=\"${var.instance_id}\" AND metric.type=\"memorystore.googleapis.com/instance/node/stats/rejected_connections_count\""
       comparison      = "COMPARISON_GT"
-      threshold_value = var.rejected_connections_threshold
+      threshold_value = var.rejected_connections_warning_threshold
       duration        = "60s"
       aggregations {
-        alignment_period   = "60s"
-        per_series_aligner = "ALIGN_SUM"
+        alignment_period     = "60s"
+        per_series_aligner   = "ALIGN_SUM"
         cross_series_reducer = "REDUCE_SUM"
         group_by_fields      = ["resource.label.instance_id"]
       }
@@ -175,6 +181,34 @@ resource "google_monitoring_alert_policy" "rejected_connections" {
   }
 
   notification_channels = local.warning_channel_ids
+}
+
+resource "google_monitoring_alert_policy" "rejected_connections_critical" {
+  project      = var.project_id
+  display_name = "[CRITICAL][${var.region}] Valkey rejected connections critical"
+  combiner     = "OR"
+  severity     = "CRITICAL"
+
+  conditions {
+    display_name = "rejected_connections_count > ${var.rejected_connections_critical_threshold}"
+    condition_threshold {
+      filter          = "resource.type=\"memorystore_instance\" AND resource.labels.instance_id=\"${var.instance_id}\" AND metric.type=\"memorystore.googleapis.com/instance/node/stats/rejected_connections_count\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = var.rejected_connections_critical_threshold
+      duration        = "60s"
+      aggregations {
+        alignment_period     = "60s"
+        per_series_aligner   = "ALIGN_SUM"
+        cross_series_reducer = "REDUCE_SUM"
+        group_by_fields      = ["resource.label.instance_id"]
+      }
+    }
+  }
+
+  notification_channels = local.critical_channel_ids
+  alert_strategy {
+    auto_close = var.critical_auto_close
+  }
 }
 
 ############################################
@@ -209,6 +243,8 @@ resource "google_monitoring_alert_policy" "connected_clients_high" {
 ############################################
 
 resource "google_monitoring_alert_policy" "replication_lag" {
+  count = local.enable_replication_lag_alert ? 1 : 0
+
   project      = var.project_id
   display_name = "[WARNING][${var.region}] Valkey replication lag high"
   combiner     = "OR"

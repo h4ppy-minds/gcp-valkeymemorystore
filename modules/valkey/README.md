@@ -1,135 +1,125 @@
 # Terraform Module: Memorystore for Valkey
 
-Production-oriented Terraform module for provisioning a Google Cloud
-Memorystore for Valkey instance, including persistence, backups,
-maintenance windows, authentication/TLS, CA management, encryption at
-rest, and Private Service Connect (PSC) networking in either a
-single-project or cross-project (host/consumer) topology.
+Reusable Terraform module for provisioning a Google Cloud Memorystore for
+Valkey instance — persistence, backups, maintenance windows,
+authentication/TLS, CA management, encryption at rest, optional Shared
+VPC connectivity, and optional cross-region DR (PRIMARY/SECONDARY) — all
+driven by input variables, with no hardcoded project, region, or network.
 
 ## Files
 
 | File | Contents |
 |---|---|
-| `provider.tf` | Terraform/provider version pinning, single `google` provider |
+| `versions.tf` | `required_providers` only — no `provider "google" {}` block, so the module never dictates project/credentials to its caller |
 | `variables.tf` | All input variables, with validation and cross-field `check` blocks |
-| `data.tf` | Region/zone lookups, project data sources |
-| `locals.tf` | Derived values (effective zone, effective consumer project, precondition helpers) |
-| `main.tf` | The `google_memorystore_instance` resource |
-| `psc_network.tf` | Networking — AUTO and USER PSC connectivity modes |
-| `output.tf` | Instance identity and connection info |
-| `test.tfvars` | Example tfvars for a cross-project USER-mode test deployment |
+| `data.tf` | Region/zone lookups, project data source, Shared VPC network lookup |
+| `locals.tf` | Derived values (effective zone(s), effective PSC network id, precondition helpers) |
+| `main.tf` | The primary `google_memorystore_instance`, plus an optional `secondary` instance for DR |
+| `output.tf` | Instance identity, PSC/discovery endpoint info, DR outputs |
 
-## Architecture: PSC Connectivity Modes
+This module is self-contained: every resource sets `project = var.project_id`
+explicitly, so a single `provider "google" {}` in your root module can
+instantiate it any number of times against different projects (see the
+example below).
 
-Memorystore instances are not directly inside your VPC. They sit in a
-Google-managed producer network and connect to your VPC(s) via **Private
-Service Connect (PSC)**. This module supports two ways to establish that
-connection, switched by `var.psc_connectivity_mode`:
+## The 3 deployment topologies — one module, one variable driving them
 
-### AUTO mode
+`var.deployment_topology` is a self-documenting label with three values:
+`STANDALONE`, `HA`, `DR`. It doesn't silently change behavior — a `check`
+block validates it's consistent with the variables that actually drive
+the resources (`replica_count`, `enable_cross_region_replication`,
+`secondary_location`), so the module's real behavior always stays fully
+explained by its explicit inputs.
 
-Memorystore creates the forwarding rule/endpoint for you, inside one
-consumer VPC that this module creates. Requires a **Service Connection
-Policy** authorizing the connection. Best for: single app, single VPC,
-same or different project than the instance.
+| Topology | What it means | Variables that produce it |
+|---|---|---|
+| `STANDALONE` | Single instance, no replicas, no cross-region DR | `replica_count = 0`, `enable_cross_region_replication = false` |
+| `HA` | Single instance + replica(s), typically `MULTI_ZONE`, still one region | `replica_count >= 1`, `enable_cross_region_replication = false` |
+| `DR` | Adds a `SECONDARY` instance in a second region, replicating from this instance (which becomes `PRIMARY`) | `enable_cross_region_replication = true`, `secondary_location` set |
 
-```
-consumer_project_id
-  └── VPC (created by this module)
-        └── Service Connection Policy: "allow gcp-memorystore PSC here"
-        └── PSC endpoint (auto-created by Memorystore)
-                    │  PSC connection
-                    ▼
-project_id (host)
-  └── google_memorystore_instance
-```
+A single call of this module produces exactly one of these three shapes
+(DR still only being one `module` call — it just creates two
+`google_memorystore_instance` resources under the hood: `primary-instance`
+and `secondary[0]`).
 
-### USER mode
+**To stand up all three topologies at once from one file**, call the
+module multiple times with `for_each` over a map of per-environment
+configs — see
+[`examples/three-topologies-single-file/main.tf`](../../examples/three-topologies-single-file/main.tf).
+That's the "single resource file, three modes" pattern: one `module`
+block, one `for_each`, three map entries.
 
-You (this module) create the forwarding rule(s) yourself and explicitly
-register them with the instance. No Service Connection Policy is
-involved — you're wiring the connection directly instead of asking
-Memorystore to automate it. Required when:
-- The app's VPC lives in a **different project** than the instance
-  (the common "host project owns Valkey, app projects consume it"
-  pattern), or
-- **Multiple separate VPCs** need to reach the same instance.
+## PSC Connectivity (`var.psc_connectivity_mode`)
 
-```
-project_id (host)
-  └── google_memorystore_instance (created WITHOUT endpoint config)
-        → exposes a service attachment once created
-
-consumer_project_id (one entry per key in var.user_networks)
-  └── VPC + subnet
-  └── Reserved internal IP (purpose = GCE_ENDPOINT)
-  └── Forwarding rule (target = instance's service attachment)
-        → this IS the PSC endpoint; connection starts PENDING
-
-project_id (host) — registration step
-  └── google_memorystore_instance_desired_user_created_endpoints
-        → registers the forwarding rule; connection flips to ACTIVE
-```
-
-> **Naming note:** resource names like `auto_producer_net` are inherited
-> from Google's own example naming and are misleading — the network you
-> see in Terraform is **always your consumer-side VPC**, never Google's
-> actual producer infrastructure. "Producer"/"consumer" refers to *who
-> provides the service* (Google), not which side owns the Terraform
-> resource.
-
-### Which mode fits your scenario?
-
-| Scenario | Mode |
+| Mode | Behavior |
 |---|---|
-| One app, one VPC, same project as instance | AUTO |
-| One app, one VPC, **different project** than instance (host/consumer split) | USER |
-| Multiple VPCs / multiple app projects consuming one shared instance | USER |
+| `NONE` (default) | No endpoint block. Nothing can reach the instance over PSC until wired up outside this module. |
+| `SHARED_VPC` | Points the instance at an **already-existing** Shared VPC network + Service Connection Policy (`service_class = gcp-memorystore`), both created outside this module. This module does not create the VPC, subnet, or policy — it only sets `desired_auto_created_endpoints`. Because the policy already authorizes the connection, Memorystore auto-creates the PSC endpoint itself the moment the instance is created; no second `apply`, no manual endpoint registration. |
 
-## ⚠️ USER mode requires a two-phase apply on first creation
-
-The forwarding rule needs the instance's service attachment as its
-target, but that attachment only exists once the instance itself is
-created. On a from-scratch `apply`:
+Required inputs for `SHARED_VPC`: `shared_vpc_host_project`,
+`shared_vpc_network_name`, `existing_scp_name` (enforced by the
+`shared_vpc_inputs_present` check block). Note `existing_scp_name` is a
+**guardrail-only** input — the `google` provider has no read-only data
+source for Service Connection Policies, so Terraform cannot verify the
+name you give it actually exists or authorizes this instance/region. It
+exists so a caller is forced to name the policy they're relying on, not
+to be programmatically checked. Confirm it out-of-band first:
 
 ```bash
-terraform apply -target=google_memorystore_instance.shared-instance -var-file=test.tfvars
-terraform apply -var-file=test.tfvars
+gcloud network-connectivity service-connection-policies describe POLICY_NAME \
+  --project=HOST_PROJECT_ID --region=REGION
 ```
 
-This mirrors Google's own USER-mode tutorials, which describe the same
-create-instance-first, register-connection-second sequence via `gcloud`.
-It is inherent to the mechanism, not a gap in this module.
+> If you need multiple separate VPCs (or a different project than the
+> instance's host project) to reach the same instance via
+> user-registered PSC connections instead, that's a larger addition this
+> module doesn't currently implement — see Known caveats.
 
 ## Prerequisites (outside Terraform)
 
 **APIs enabled:**
 - Host project (`project_id`): `memorystore.googleapis.com`
-- Consumer project (`consumer_project_id`): `compute.googleapis.com`,
-  `networkconnectivity.googleapis.com` (AUTO mode only)
+- Shared VPC host project (`shared_vpc_host_project`, `SHARED_VPC` mode only): `compute.googleapis.com`, `networkconnectivity.googleapis.com`
 
 **IAM**, for whoever runs `terraform apply`:
 - Host project: `roles/memorystore.admin` (or equivalent)
-- Consumer project: `roles/compute.networkAdmin`, and (AUTO mode)
-  `roles/networkconnectivity.serviceConnectionPolicyAdmin`
+- Shared VPC host project (`SHARED_VPC` mode): `roles/compute.networkViewer` at minimum (this module only reads the network, it doesn't create it)
 
-If using `CUSTOMER_MANAGED_CA` or `CUSTOMER_MANAGED` (CMEK) encryption,
-Memorystore's service agent
-(`service-PROJECT_NUMBER@cloud-memorystore.iam.gserviceaccount.com`)
-also needs `roles/privateca.certificateRequester` on your CA pool, or
+If using `CUSTOMER_MANAGED_CAS_CA` or `CUSTOMER_MANAGED` (CMEK)
+encryption, Memorystore's service agent
+(`service-PROJECT_NUMBER@cloud-memorystore.iam.gserviceaccount.com`) also
+needs `roles/privateca.certificateRequester` on your CA pool, or
 `roles/cloudkms.cryptoKeyEncrypterDecrypter` on your KMS key,
 respectively. These IAM bindings are **not included** in this module —
 add them alongside if you use those features.
 
 ## Usage
 
+```hcl
+module "valkey" {
+  source = "./modules/memorystore-valkey"
+
+  project_id  = "my-project"
+  instance_id = "cache-prod"
+  environment = "PROD"
+  location    = "us-central1"
+
+  deployment_topology = "HA"
+  replica_count       = 2
+  node_type           = "STANDARD_LARGE"
+  shard_count         = 3
+}
+```
+
 ```bash
 terraform init
 terraform validate
-terraform plan  -var-file=test.tfvars
-terraform apply -target=google_memorystore_instance.shared-instance -var-file=test.tfvars  # USER mode first pass only
-terraform apply -var-file=test.tfvars
+terraform plan
+terraform apply
 ```
+
+See `examples/three-topologies-single-file/` for a complete root module
+that deploys STANDALONE, HA, and DR instances together via `for_each`.
 
 ## Key variables
 
@@ -139,9 +129,8 @@ Notable ones:
 | Variable | Purpose |
 |---|---|
 | `project_id` | Host project (required, no default) |
-| `consumer_project_id` | Consumer project (optional; defaults to `project_id`) |
-| `psc_connectivity_mode` | `AUTO` or `USER` |
-| `user_networks` | Map of consumer VPCs to wire up in `USER` mode |
+| `deployment_topology` | `STANDALONE` / `HA` / `DR` — see above |
+| `psc_connectivity_mode` | `NONE` or `SHARED_VPC` |
 | `persistence_mode` | `RDB`, `AOF`, or `DISABLED` |
 | `automated_backup_enabled` | GCS-backed backup collection, separate from persistence |
 | `authorization_mode` / `transit_encryption_mode` | AUTH + TLS — see cross-field `check` blocks enforcing IAM_AUTH requires TLS |
@@ -149,94 +138,22 @@ Notable ones:
 | `encryption_type` / `kms_key` | Encryption at rest (CMEK) |
 | `deletion_protection_enabled` | Defaults to `true` — set `false` explicitly for disposable test instances |
 
-## USER mode resource shape (confirmed via provider error output)
-
-`google_memorystore_instance_desired_user_created_endpoints` nests three
-levels of blocks, all using standard `dynamic` block syntax — no unusual
-object-attribute syntax involved (an earlier draft of this module guessed
-otherwise, based on a Pulumi bridge-provider sample that turned out not
-to reflect the real `hashicorp/google` schema; the live `terraform plan`
-error was the actual source of truth here):
-
-```hcl
-resource "google_memorystore_instance_desired_user_created_endpoints" "x" {
-  name    = "..."
-  region  = "..."
-  project = "..."
-
-  desired_user_created_endpoints {   # one per consumer network
-    connections {                    # one per service attachment reachable from that network
-      psc_connection {                # nested block, not an attribute
-        psc_connection_id  = "..."
-        ip_address          = "..."
-        forwarding_rule     = "..."
-        network             = "..."
-        service_attachment  = "..."
-      }
-    }
-  }
-}
-```
-
-The forwarding rule's `target` — and `psc_connection.service_attachment`
-above — both come from `google_memorystore_instance.shared-instance.psc_attachment_details[N].service_attachment`,
-a flat computed list directly on the instance. An instance can expose
-**multiple** service attachments (e.g. discovery + one per shard/replica);
-this module creates one reserved IP + forwarding rule per
-(consumer network × attachment) pair to cover all of them, keyed as
-`"<network-key>-<attachment-index>"` in `psc_network.tf` and in this
-module's outputs.
-
 ## Known caveats — verify before production use
 
+- **DR pairing on the primary side is unverified** — see the warning
+  under "The 3 deployment topologies" above.
 - **`server_ca_mode` enum casing**: this field was added recently to the
   provider; confirm exact values via `terraform providers schema -json`
   before relying on it.
-- **This module does not create a secondary (cross-region DR) instance.**
-  See prior design discussion if you need `PRIMARY`/`SECONDARY`
-  cross-region replication — that's a separate, larger addition (second
-  instance resource + its own network trio + `instance_role` /
-  `primary_instance` wiring).
+- **Multi-VPC / user-registered PSC connections are not implemented.**
+  If you need several separate consumer VPCs (or a different project
+  than the instance's host project) reaching the same instance without
+  a Shared VPC, that requires a separate `USER`-mode connectivity path
+  (self-created forwarding rules +
+  `google_memorystore_instance_desired_user_created_endpoints`) that
+  this module doesn't currently build. That's a larger, separate
+  addition, not a variant of `SHARED_VPC` mode.
 - **CA/KMS service-agent IAM bindings are not included** — see
   Prerequisites above.
-
-## Testing this module
-
-`test.tfvars` deploys the smallest valid configuration for your actual
-target topology (USER mode, host project `valkeyhubhost-500604`,
-consumer project `serviceproj1-500604`): single shard, no replicas, no
-persistence, no backups, auth disabled — enough to validate the
-connectivity plumbing works without exercising every feature at once.
-Once that succeeds, layer on persistence/backups/auth/CA/CMEK
-incrementally rather than enabling everything in one pass.
-
-Found it. Here's the breakdown for the Memorystore for Valkey REST API (`v1`):
-
-## `PscAttachmentDetail`
-
-This is an **output-only** field on the `Instance` resource (`pscAttachmentDetails[]`) that tells you which service attachments exist so you can create your own PSC connections against them.
-
-```json
-{
-  "serviceAttachment": string,
-  "connectionType": enum(ConnectionType)
-}
-```
-
-| Field | Description |
-|---|---|
-| `serviceAttachment` | URI of the service attachment your self-created PSC connection should target. |
-| `connectionType` | Which role this attachment's connection will serve (see below). |
-
-## `ConnectionType` enum (shared across `PscAttachmentDetail`, `PscAutoConnection`, and `PscConnection`)
-
-| Value | Meaning |
-|---|---|
-| `CONNECTION_TYPE_UNSPECIFIED` | Not set. |
-| `CONNECTION_TYPE_DISCOVERY` | Used for topology discovery (the discovery endpoint). |
-| `CONNECTION_TYPE_PRIMARY` | Used as the primary endpoint (read/write access to the primary node) — mainly relevant for Cluster Mode Disabled instances. |
-| `CONNECTION_TYPE_READER` | Used as the reader endpoint (access to replicas) — mainly relevant for Cluster Mode Disabled instances. |
-
-So a Memorystore for Valkey instance's `pscAttachmentDetails` list will typically contain one entry per role it exposes — e.g., a Cluster Mode Enabled instance mainly needs `CONNECTION_TYPE_DISCOVERY` (plus one per shard/proxy depending on config), while a Cluster Mode Disabled instance can expose `CONNECTION_TYPE_DISCOVERY`, `CONNECTION_TYPE_PRIMARY`, and `CONNECTION_TYPE_READER`.
-
-This maps to the `PscAttachmentDetail` message documented at [cloud.google.com/memorystore/docs/valkey/reference/rest/v1/projects.locations.instances](https://cloud.google.com/memorystore/docs/valkey/reference/rest/v1/projects.locations.instances#PscAttachmentDetail).
+- **`existing_scp_name` has no Terraform-level effect** — see the PSC
+  Connectivity section above.

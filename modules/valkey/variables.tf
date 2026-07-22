@@ -82,13 +82,6 @@ variable "project_id" {
   }
 }
 
-variable "consumer_project_id" {
-  description = "Project ID where the consumer VPC network lives (the app's project). Defaults to project_id for same-project deployments. Set explicitly for cross-project setups (e.g. a shared 'valkey host' project serving multiple app projects)."
-  type        = string
-  default     = null
-  nullable    = true
-}
-
 variable "environment" {
   type        = string
   description = "Deployment environment: DEV, QA, UAT, or PROD. Drives stricter preconditions (e.g. blocks SHARED_CORE_NANO in PROD)."
@@ -262,8 +255,9 @@ variable "shared_vpc_network_name" {
   default = null
 }
 variable "existing_scp_name" {
-  type    = string
-  default = null
+  type        = string
+  description = "Name of the pre-existing Service Connection Policy (service_class = gcp-memorystore) that authorizes this connection. NOT wired into any resource or data source — the google provider has no read-only data source for Service Connection Policies, so this cannot be verified by Terraform. It exists purely so a caller in SHARED_VPC mode must explicitly name the policy they're relying on, as a documentation/handoff guardrail. Confirm it out-of-band with `gcloud network-connectivity service-connection-policies describe` before applying."
+  default     = null
 }
 
 check "shared_vpc_inputs_present" {

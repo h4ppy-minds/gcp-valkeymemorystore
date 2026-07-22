@@ -1,9 +1,15 @@
 ############################################
 # Memorystore for Valkey — primary instance
 #
-# Lives in var.project_id (the "host" project). Network connectivity is
-# handled entirely in psc_network.tf: see that file for how AUTO vs USER
-# mode differ, and which project each network resource lands in.
+# Lives in var.project_id. Network connectivity is controlled by
+# var.psc_connectivity_mode:
+#   NONE        — no endpoint block; nothing can reach the instance over
+#                 PSC until wired up some other way, outside this module.
+#   SHARED_VPC  — points the instance at an already-existing Shared VPC
+#                 network + Service Connection Policy (both created
+#                 outside this module — see data.tf and the
+#                 shared_vpc_* / existing_scp_name variables). Memorystore
+#                 auto-creates the PSC endpoint itself; no second apply.
 #
 # Topology: var.deployment_topology (STANDALONE / HA / DR) is a
 # self-documenting label validated for consistency against
@@ -17,6 +23,7 @@
 resource "google_memorystore_instance" "primary-instance" {
 
   # --- Identity ---
+  project     = var.project_id
   instance_id = var.instance_id
 
   # --- Region and zonal availability ---
@@ -36,11 +43,7 @@ resource "google_memorystore_instance" "primary-instance" {
   replica_count = var.replica_count
 
   # --- Cross-region replication role ---
-  # NONE for STANDALONE/HA. PRIMARY when this instance is the source for a
-  # SECONDARY instance in DR mode (see secondary resource below).
-  # cross_instance_replication_config {
-  #   instance_role = var.enable_cross_region_replication ? "PRIMARY" : "NONE"
-  # }
+  # NONE for STANDALONE/HA.
   # --- Network endpoint (AUTO mode only) ---
   # In USER mode, the instance is created with NO endpoint block at all.
   # The connection is created and registered afterward via the separate
@@ -50,8 +53,7 @@ resource "google_memorystore_instance" "primary-instance" {
   dynamic "desired_auto_created_endpoints" {
     for_each = var.psc_connectivity_mode == "SHARED_VPC" ? [1] : []
     content {
-      network = local.effective_psc_network_id
-      #project_id = var.shared_vpc_host_project
+      network    = local.effective_psc_network_id
       project_id = var.project_id
     }
   }
@@ -180,6 +182,7 @@ resource "google_memorystore_instance" "primary-instance" {
 resource "google_memorystore_instance" "secondary" {
   count = var.enable_cross_region_replication ? 1 : 0
 
+  project     = var.project_id
   instance_id = "${var.instance_id}-dr"
   location    = var.secondary_location
 
@@ -202,8 +205,7 @@ resource "google_memorystore_instance" "secondary" {
   dynamic "desired_auto_created_endpoints" {
     for_each = var.psc_connectivity_mode == "SHARED_VPC" ? [1] : []
     content {
-      network = local.effective_psc_network_id
-      #project_id = var.shared_vpc_host_project
+      network    = local.effective_psc_network_id
       project_id = var.project_id
     }
   }
