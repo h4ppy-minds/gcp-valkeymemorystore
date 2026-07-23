@@ -12,7 +12,7 @@ variable "env" {
 variable "manifest_file" {
   description = "Which manifest to read: memorystore-manifest-standalone.yaml, memorystore-manifest-ha.yaml, or memorystore-manifest-dr.yaml."
   type        = string
-  default     = "memorystore-manifest-dr.yaml"
+  default     = "memorystore-manifest-ha.yaml"
 
   validation {
     condition = contains([

@@ -23,12 +23,12 @@ valkey:
       cluster_mode: "CLUSTER_DISABLED"
       node_type: "STANDARD_SMALL"
       shard_count: 1 # must be 1 when cluster_mode = CLUSTER_DISABLED
-      replica_count: 0 # STANDALONE requires 0
+      replica_count: 1 # STANDALONE requires 0
 
       # --- PSC Connectivity ---
-      psc_connectivity_mode: "NONE"
-      shared_vpc_host_project: null
-      shared_vpc_network_name: null
+      psc_connectivity_mode: "SHARED_VPC"
+      shared_vpc_host_project: "net-host-prod-502521"
+      shared_vpc_network_name: "shared-net"
 
       # --- Authorization & TLS ---
       # AUTH_DISABLED + TRANSIT_ENCRYPTION_DISABLED passes the module's
@@ -75,6 +75,8 @@ valkey:
 
       # --- Deletion Protection & Labels ---
       deletion_protection_enabled: false
+      appteam_emails: []
+      platformteam_emails: ["sifukun23@gmail.com"]
       labels: { env: "dev", managed_by: "terraform", service: "valkey" }
 
   qa:

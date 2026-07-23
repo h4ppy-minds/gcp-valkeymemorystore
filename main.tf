@@ -85,29 +85,24 @@ module "valkey" {
 # in variables.tf — add them (or hardcode per-manifest values under
 # each.value, same pattern as module.valkey above) before uncommenting.
 #
-# module "valkey_alerts" {
-#   source   = "./modules/valkey-alerts"
-#   for_each = local.enabled_configs
-#
-#   project_id    = each.value.project_id
-#   instance_id   = module.valkey[each.key].instance_id
-#   region        = each.value.location
-#   replica_count = each.value.replica_count
-#
-#   requester_critical_emails = var.requester_critical_emails
-#   requester_warning_emails  = var.requester_warning_emails
-#   platform_critical_emails  = var.platform_critical_emails
-#   platform_warning_emails   = var.platform_warning_emails
-#
-#   cpu_warning_threshold                   = var.cpu_warning_threshold
-#   cpu_critical_threshold                  = var.cpu_critical_threshold
-#   memory_warning_threshold                = var.memory_warning_threshold
-#   memory_critical_threshold               = var.memory_critical_threshold
-#   rejected_connections_warning_threshold  = var.rejected_connections_warning_threshold
-#   rejected_connections_critical_threshold = var.rejected_connections_critical_threshold
-#   connected_clients_warning_threshold     = var.connected_clients_warning_threshold
-#   replication_lag_warning_bytes           = var.replication_lag_warning_bytes
-#
-#   enable_admin_activity_alerts = true
-#   enable_system_event_alerts   = true
-# }
+module "valkey_alerts" {
+  source   = "./modules/valkey-alerting"
+  for_each = local.enabled_configs
+
+  project_id    = each.value.project_id
+  instance_id   = module.valkey[each.key].instance_id
+  region        = each.value.location
+  replica_count = each.value.replica_count
+
+  appteam_emails      = each.value.appteam_emails
+  platformteam_emails = each.value.platformteam_emails
+
+  # cpu_warning_threshold                   = var.cpu_warning_threshold
+  # cpu_critical_threshold                  = var.cpu_critical_threshold
+  # memory_warning_threshold                = var.memory_warning_threshold
+  # memory_critical_threshold               = var.memory_critical_threshold
+  # rejected_connections_warning_threshold  = var.rejected_connections_warning_threshold
+  # rejected_connections_critical_threshold = var.rejected_connections_critical_threshold
+  # connected_clients_warning_threshold     = var.connected_clients_warning_threshold
+  # replication_lag_warning_bytes           = var.replication_lag_warning_bytes
+}

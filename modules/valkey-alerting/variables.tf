@@ -1,15 +1,15 @@
 ############################################
-# Target instance
+# Required — target instance and notification path
 ############################################
 
 variable "project_id" {
   type        = string
-  description = "Project ID where the Memorystore for Valkey instance lives. Alert policies AND all notification channels are created here — Cloud Monitoring notification channels are project-scoped resources and an alert policy can only reference channels in its own project, so there is no valid way to split channels across projects for a single instance's alerts."
+  description = "Project ID where the Memorystore for Valkey instance lives. Alert policies AND all notification channels are created here — Cloud Monitoring notification channels are project-scoped and an alert policy can only reference channels in its own project, so there is no valid way to split channels across projects for a single instance's alerts."
 }
 
 variable "instance_id" {
   type        = string
-  description = "The Memorystore for Valkey instance ID to monitor (e.g. google_memorystore_instance.this.instance_id)."
+  description = "The Memorystore for Valkey instance ID to monitor (e.g. module.valkey.instance_id)."
 }
 
 variable "region" {
@@ -17,53 +17,44 @@ variable "region" {
   description = "Region of the instance, used in alert display names."
 }
 
-variable "replica_count" {
-  type        = number
-  description = "Replica count of the monitored instance. Purely informational here (this module doesn't create the instance) — used only to default enable_replication_lag_alert off for STANDALONE instances, where the replication metric never reports anything meaningful. Pass the same value you gave the instance itself."
-  default     = 0
+variable "appteam_emails" {
+  type        = set(string)
+  description = "App team's email addresses — every one of these gets notified on every alert this module creates, regardless of severity. set(string) because order doesn't matter and duplicates are meaningless here. Required."
+
 }
 
-############################################
-# Notification emails
-#
-# Two audiences, each split by severity:
-#   - requester_*: the team that asked for this instance — this is what
-#     "alert to the emails the requester gave us" maps to. Required.
-#   - platform_*: your own (host project) ops/on-call distribution list,
-#     cc'd on every instance this module is used for. Optional — leave
-#     empty if you don't want a standing platform-wide channel yet.
-############################################
-
-variable "requester_critical_emails" {
-  type        = list(string)
-  description = "Email addresses the requester gave you to receive CRITICAL alerts (instance down, CPU/memory critical) for their instance. Required — this is the primary notification path."
-
+variable "platformteam_emails" {
+  type        = set(string)
+  description = "Platform/on-call team's email addresses — notified on every alert alongside appteam_emails. Optional; leave empty if you don't have a standing platform list yet."
+  default     = []
   validation {
-    condition     = length(var.requester_critical_emails) > 0
-    error_message = "requester_critical_emails must have at least one address — CRITICAL alerts with nowhere to go are silent outages."
+    condition     = length(var.platformteam_emails) > 0
+    error_message = "platformteam_emails must have at least one address — alerts with nowhere to go are silent outages."
   }
 }
 
-variable "requester_warning_emails" {
-  type        = list(string)
-  description = "Email addresses the requester gave you to receive WARNING alerts for their instance. Defaults to requester_critical_emails if left empty, so warnings are never silently dropped just because this wasn't set."
-  default     = []
+############################################
+# Optional — commonly set
+############################################
+
+variable "replica_count" {
+  type        = number
+  description = "Replica count of the monitored instance. Purely informational here (this module doesn't create the instance) — used only to default the replication-lag alert off for STANDALONE instances, where the replication metric never reports anything meaningful. Pass the same value you gave the instance itself."
+  default     = 0
 }
 
-variable "platform_critical_emails" {
-  type        = list(string)
-  description = "Optional standing platform/on-call distribution list, cc'd on CRITICAL alerts for this instance in addition to the requester's addresses. Leave empty if you don't have one yet."
-  default     = []
-}
-
-variable "platform_warning_emails" {
-  type        = list(string)
-  description = "Optional standing platform/on-call distribution list, cc'd on WARNING alerts for this instance in addition to the requester's addresses. Leave empty if you don't have one yet."
-  default     = []
+variable "enable_replication_lag_alert" {
+  type        = bool
+  description = "Whether to create the replication-lag alert. Null (default) means: on only when replica_count > 0. Override explicitly if you want it on/off regardless of replica_count."
+  default     = null
+  nullable    = true
 }
 
 ############################################
-# Thresholds — tune per workload
+# Optional — thresholds. Every default below reflects Google's general
+# guidance for a production cache; you should not need to touch these for
+# a typical instance. They're variables (not hardcoded) so a workload with
+# a genuinely different baseline can override without forking the module.
 ############################################
 
 variable "cpu_warning_threshold" {
@@ -80,7 +71,7 @@ variable "cpu_critical_threshold" {
 
 variable "memory_warning_threshold" {
   type        = number
-  description = "Memory maximum_utilization (0.0-1.0) that triggers a WARNING alert. Google recommends starting to act around 0.8 if you expect continued data growth (see general-best-practices doc)."
+  description = "Memory maximum_utilization (0.0-1.0) that triggers a WARNING alert. Google recommends starting to act around 0.8 if you expect continued data growth."
   default     = 0.8
 }
 
@@ -98,7 +89,7 @@ variable "rejected_connections_warning_threshold" {
 
 variable "rejected_connections_critical_threshold" {
   type        = number
-  description = "Count of rejected connections (per alignment period) that triggers a CRITICAL alert — this is client-visible failed connections, not just a soft signal, once it's sustained and high."
+  description = "Count of rejected connections (per alignment period) that triggers a CRITICAL alert — this is client-visible failed connections, sustained and high, not just a soft signal."
   default     = 50
 }
 
@@ -115,30 +106,106 @@ variable "replication_lag_warning_bytes" {
 }
 
 ############################################
-# Alerting behavior
+# Advanced — timing knobs. Defaults match Google's own recommended alerting
+# posture for this metric set. You should essentially never need to change
+# these; they're exposed only so a false-positive/flapping alert can be
+# retuned without editing module code.
 ############################################
-
-variable "enable_replication_lag_alert" {
-  type        = bool
-  description = "Whether to create the replication-lag alert. Defaults to true only when replica_count > 0 — for a STANDALONE instance with no replicas, the underlying maximum_offset_diff metric never reports anything meaningful, so the alert would just sit permanently un-firing (harmless, but noise in your policy list). Override explicitly if you want it on/off regardless of replica_count."
-  default     = null
-  nullable    = true
-}
 
 variable "critical_alignment_period" {
   type        = string
-  description = "Alignment period for critical conditions (instance down, CPU/memory critical)."
+  description = "Alignment period for the instance_down conditions (health check + absent check)."
   default     = "60s"
 }
 
 variable "warning_duration" {
   type        = string
-  description = "How long a warning condition must persist before firing (avoids flapping on brief spikes)."
+  description = "How long a WARNING condition must persist before firing (avoids flapping on brief spikes). Shared by cpu_warning, memory_warning, connected_clients_high, and replication_lag."
+  default     = "300s"
+}
+
+variable "cpu_critical_duration" {
+  type        = string
+  description = "How long the CPU CRITICAL condition must persist before firing."
+  default     = "180s"
+}
+
+variable "memory_critical_duration" {
+  type        = string
+  description = "How long the memory CRITICAL condition must persist before firing."
+  default     = "180s"
+}
+
+variable "rejected_connections_duration" {
+  type        = string
+  description = "How long the rejected-connections condition must persist before firing. Shared by both the WARNING and CRITICAL tier — deliberately short, since any sustained rejection is worth surfacing quickly."
+  default     = "60s"
+}
+
+variable "instance_down_absent_duration" {
+  type        = string
+  description = "How long the instance_down health metric must be absent before firing (covers regional-outage-style silent failure)."
   default     = "300s"
 }
 
 variable "critical_auto_close" {
   type        = string
-  description = "How long Cloud Monitoring waits before auto-closing a critical incident if the condition stops firing without an explicit resolution."
+  description = "How long Cloud Monitoring waits before auto-closing a CRITICAL incident if the condition stops firing without an explicit resolution."
   default     = "1800s"
+}
+
+############################################
+# Advanced — metric type and resource type overrides. You should never need
+# to touch these in normal use. Both were verified against a live project's
+# monitoredResourceDescriptors API rather than guessed — see the module
+# README for the verification command if you ever need to re-check them
+# (e.g. after a Google API change).
+############################################
+
+variable "resource_type_instance" {
+  type        = string
+  description = "Monitored resource type for instance-level metrics (CPU, memory) — confirmed via monitoredResourceDescriptors. Used by cpu_warning, cpu_critical, memory_warning, memory_critical."
+  default     = "memorystore.googleapis.com/Instance"
+}
+
+variable "resource_type_instance_node" {
+  type        = string
+  description = "Monitored resource type for node-level metrics (health, connections, replication) — confirmed via monitoredResourceDescriptors. Used by instance_down, rejected_connections_warning, rejected_connections_critical, connected_clients_high, replication_lag."
+  default     = "memorystore.googleapis.com/InstanceNode"
+}
+
+variable "metric_type_instance_health" {
+  type        = string
+  description = "Metric type for node health, used by instance_down. Confirmed against the official supported-monitoring-metrics reference."
+  default     = "memorystore.googleapis.com/instance/node/server/healthy"
+}
+
+variable "metric_type_cpu" {
+  type        = string
+  description = "Metric type for CPU utilization, used by cpu_warning / cpu_critical."
+  default     = "memorystore.googleapis.com/instance/cpu/maximum_utilization"
+}
+
+variable "metric_type_memory" {
+  type        = string
+  description = "Metric type for memory utilization, used by memory_warning / memory_critical."
+  default     = "memorystore.googleapis.com/instance/memory/maximum_utilization"
+}
+
+variable "metric_type_rejected_connections" {
+  type        = string
+  description = "Metric type for rejected connections, used by rejected_connections_warning / _critical."
+  default     = "memorystore.googleapis.com/instance/node/stats/rejected_connections_count"
+}
+
+variable "metric_type_connected_clients" {
+  type        = string
+  description = "Metric type for connected client count, used by connected_clients_high."
+  default     = "memorystore.googleapis.com/instance/node/clients/connected_clients"
+}
+
+variable "metric_type_replication_lag" {
+  type        = string
+  description = "Metric type for replication offset diff, used by replication_lag. Confirmed against the official supported-monitoring-metrics reference — this is an INSTANCE-level metric (see resource_type_instance, not resource_type_instance_node, in alert_definitions)."
+  default     = "memorystore.googleapis.com/instance/replication/maximum_offset_diff"
 }

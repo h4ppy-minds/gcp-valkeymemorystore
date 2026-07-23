@@ -1,17 +1,26 @@
 output "valkey_instances" {
-  description = "Per-instance details, keyed the same way as module.valkey (i.e. by manifest entry name, e.g. \"example1\"). Access a single field as valkey_instances[\"example1\"].instance_id, etc. secondary_* fields are null/empty for STANDALONE and HA instances."
+  description = "..."
   value = {
-    for k, m in module.valkey : k => {
-      instance_id                      = m.instance_id
-      instance_name                    = m.instance_name
-      resolved_zone                    = m.resolved_zone
-      psc_connectivity_mode            = m.psc_connectivity_mode
-      shared_vpc_network_self_link     = m.shared_vpc_network_self_link
-      psc_attachment_details           = m.psc_attachment_details
-      discovery_endpoints              = m.discovery_endpoints
-      secondary_instance_id            = m.secondary_instance_id
-      secondary_psc_attachment_details = m.secondary_psc_attachment_details
-      secondary_discovery_endpoints    = m.secondary_discovery_endpoints
-    }
+    for key, inst in module.valkey : key => merge(
+      {
+        instance_id                      = inst.instance_id
+        instance_name                    = inst.instance_name
+        discovery_endpoints              = inst.discovery_endpoints
+        psc_attachment_details           = inst.psc_attachment_details
+        psc_connectivity_mode            = inst.psc_connectivity_mode
+        resolved_zone                    = inst.resolved_zone
+        secondary_discovery_endpoints    = inst.secondary_discovery_endpoints
+        secondary_instance_id            = inst.secondary_instance_id
+        secondary_psc_attachment_details = inst.secondary_psc_attachment_details
+        shared_vpc_network_self_link     = inst.shared_vpc_network_self_link
+      },
+      {
+        alerting = {
+          alert_policy_ids              = module.valkey_alerts[key].alert_policy_ids
+          notification_channel_ids      = module.valkey_alerts[key].notification_channel_ids
+          replication_lag_alert_enabled = module.valkey_alerts[key].replication_lag_alert_enabled
+        }
+      }
+    )
   }
 }

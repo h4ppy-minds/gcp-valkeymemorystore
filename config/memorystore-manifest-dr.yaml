@@ -86,6 +86,8 @@ valkey:
 
       # --- Deletion Protection & Labels ---
       deletion_protection_enabled: false
+      appteam_emails: []
+      platformteam_emails: ["sifukun23@gmail.com"]
       labels: { env: "dev", managed_by: "terraform", service: "valkey" }
 
   qa:
