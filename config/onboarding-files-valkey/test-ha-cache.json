@@ -1,0 +1,18 @@
+{
+  "request_type": "delete",
+  "environment": "dev",
+  "requested_by": "platform-team",
+  "instance": {
+    "instance_id": "test-ha-cache",
+    "shard_count": 2,
+    "replica_count": 1,
+    "cross_region_replica": false,
+    "labels": {
+      "team": "platform-demo",
+      "cost_center": "cc-0002",
+      "topology": "ha",
+      "managed_by": "terraform"
+    },
+    "appteam_emails": []
+  }
+}

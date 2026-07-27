@@ -1,5 +1,5 @@
 output "valkey_instances" {
-  description = "..."
+  description = "One entry per onboarding request that's enabled for this environment (request_type != delete, environment == var.env)."
   value = {
     for key, inst in module.valkey : key => merge(
       {
@@ -22,5 +22,16 @@ output "valkey_instances" {
         }
       }
     )
+  }
+}
+
+output "derived_topology_by_instance" {
+  description = "Debug helper: shows the deployment_topology, secondary_location, and resolved rdb_snapshot_start_time that locals.tf derived for each onboarded instance, before it was even sent to the module — useful for reviewing an onboarding PR's actual effect without running plan."
+  value = {
+    for name, cfg in local.valkey : name => {
+      deployment_topology     = cfg.deployment_topology
+      secondary_location      = cfg.secondary_location
+      rdb_snapshot_start_time = cfg.rdb_snapshot_start_time
+    }
   }
 }

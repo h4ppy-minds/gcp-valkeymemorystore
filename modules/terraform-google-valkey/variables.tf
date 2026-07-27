@@ -533,7 +533,7 @@ variable "maintenance_start_hour" {
 variable "engine_version" {
   type        = string
   description = "Valkey engine version. Immutable after creation — changing this forces a new instance (or requires a documented major-version upgrade path outside Terraform)."
-  default     = "VALKEY_7_2"
+  default     = "VALKEY_9_0"
   nullable    = false
 
   validation {

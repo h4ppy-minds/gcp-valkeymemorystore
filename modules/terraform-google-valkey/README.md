@@ -6,6 +6,38 @@ authentication/TLS, CA management, encryption at rest, optional Shared
 VPC connectivity, and optional cross-region DR (PRIMARY/SECONDARY) — all
 driven by input variables, with no hardcoded project, region, or network.
 
+**Region-agnostic by construction:** `var.location` (and `var.secondary_location`
+for DR) accept any region Memorystore for Valkey supports — there is no
+hardcoded allow-list. Validity is checked dynamically at plan/apply time
+against `data.google_compute_regions.available_regions` for the target
+project, so the same module version works unmodified whether you're
+deploying to `us-central1`, `europe-west1`, or `asia-southeast1`.
+**Environment-agnostic by construction:** the module itself has zero
+awareness of "dev/qa/uat/prod" beyond the free-text `var.environment`
+label (used only in one validation: `SHARED_CORE_NANO` is blocked when
+`environment == "PROD"`, case-insensitive). Every other behavior comes
+from the variables you pass — environment differences belong in your root
+module's tfvars/manifest, not in this module's code.
+
+## Installing from the private registry
+
+```hcl
+module "valkey" {
+  source  = "app.terraform.io/<YOUR_ORG>/valkey/google"
+  version = "~> 1.0"
+
+  project_id  = "my-project"
+  environment = "PROD"
+  instance_id = "my-valkey"
+  location    = "us-central1"
+  # ...remaining variables — see examples/ for full topology examples
+}
+```
+
+Replace `<YOUR_ORG>` with your Terraform Cloud/Enterprise organization
+name. See `REGISTRY_PUBLISHING.md` in the repo root for how this module
+gets published there in the first place.
+
 ## Files
 
 | File | Contents |
@@ -15,7 +47,8 @@ driven by input variables, with no hardcoded project, region, or network.
 | `data.tf` | Region/zone lookups, project data source, Shared VPC network lookup |
 | `locals.tf` | Derived values (effective zone(s), effective PSC network id, precondition helpers) |
 | `main.tf` | The primary `google_memorystore_instance`, plus an optional `secondary` instance for DR |
-| `output.tf` | Instance identity, PSC/discovery endpoint info, DR outputs |
+| `outputs.tf` | Instance identity, PSC/discovery endpoint info, DR outputs |
+| `examples/` | Self-contained STANDALONE / HA / DR examples, each runnable on its own |
 
 This module is self-contained: every resource sets `project = var.project_id`
 explicitly, so a single `provider "google" {}` in your root module can
@@ -157,3 +190,36 @@ Notable ones:
   Prerequisites above.
 - **`existing_scp_name` has no Terraform-level effect** — see the PSC
   Connectivity section above.
+- **Changing `shard_count` and `replica_count` together fails on an
+  existing instance.** The `google_memorystore_instance` Update API only
+  accepts one changed field per update request. If a `terraform plan`
+  shows both `shard_count` and `replica_count` changing on an
+  *already-created* instance in the same apply, the API rejects it:
+
+  This only affects **updates** to an existing instance — creating a new
+  instance with any combination of `shard_count`/`replica_count` in one
+  apply works fine, since there's no update_mask involved on create.
+
+  **Fix:** change one field, apply, then change the other, apply again.
+  When *shrinking* both, reduce `replica_count` first, then
+  `shard_count` — Memorystore's node math is
+  `shard_count × (1 + replica_count)`, so dropping replicas first keeps
+  you further from any transient capacity/validation edge case during
+  the shrink. When *growing* both, do the reverse: `shard_count` first,
+  then `replica_count`.
+
+```bash
+  # Example: shard_count 2->1 AND replica_count 2->1 on an existing instance
+  # Step 1: replica_count only
+  terraform apply -var="env=dev"   # after editing replica_count in the request file
+  # Step 2: shard_count only
+  terraform apply -var="env=dev"   # after editing shard_count in the request file
+```
+
+  This module doesn't currently detect or block a same-apply multi-field
+  change ahead of time — the API error is what you'll see if you hit it.
+  A `check` block that warns when both would change in the same plan is
+  a reasonable future addition (would need `terraform_data`/state-
+  comparison tricks since `check` blocks can't diff old vs. new directly
+  for a resource attribute — noting here rather than implementing
+  speculatively).
