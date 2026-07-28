@@ -1,5 +1,5 @@
 {
-  "request_type": "create",
+  "request_type": "delete",
   "environment": "dev",
   "requested_by": "platform-team",
   "instance": {
