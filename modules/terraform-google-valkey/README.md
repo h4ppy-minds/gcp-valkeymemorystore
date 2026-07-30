@@ -108,7 +108,7 @@ instance this module manages, rather than a gap.
 ```hcl
 module "valkey" {
   source  = "app.terraform.io/<YOUR_ORG>/valkey/google"
-  version = "~> 2.0"
+  version = "~> 1.0"
 
   project_id  = "my-project"
   environment = "PROD"
