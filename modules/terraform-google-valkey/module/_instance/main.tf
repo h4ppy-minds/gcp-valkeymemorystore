@@ -1,14 +1,7 @@
-############################################
-# Memorystore for Valkey — primary instance
-#
-# Lives in var.project_id (the "host" project). Network connectivity is
-# handled entirely in psc_network.tf: see that file for how AUTO vs USER
-# mode differ, and which project each network resource lands in.
-############################################
-
-resource "google_memorystore_instance" "shared-instance" {
+resource "google_memorystore_instance" "this" {
 
   # --- Identity ---
+  project     = var.project_id
   instance_id = var.instance_id
 
   # --- Region and zonal availability ---
@@ -16,7 +9,7 @@ resource "google_memorystore_instance" "shared-instance" {
 
   zone_distribution_config {
     mode = var.zone_distribution_mode
-    zone = local.effective_zone
+    zone = var.effective_zone
   }
 
   # --- Cluster mode (Enabled/Disabled) ---
@@ -27,18 +20,23 @@ resource "google_memorystore_instance" "shared-instance" {
   shard_count   = var.shard_count
   replica_count = var.replica_count
 
-  # --- Network endpoint (AUTO mode only) ---
-  # In USER mode, the instance is created with NO endpoint block at all.
-  # The connection is created and registered afterward via the separate
-  # google_memorystore_instance_desired_user_created_endpoints resource
-  # in psc_network.tf, once the instance (and its service attachment)
-  # exists. See psc_network.tf and README.md for the two-phase apply
-  # this requires in USER mode.
-  dynamic "desired_auto_created_endpoints" {
-    for_each = var.psc_connectivity_mode == "AUTO" ? [1] : []
+
+  dynamic "cross_instance_replication_config" {
+    for_each = var.instance_role == "SECONDARY" ? [1] : []
     content {
-      network    = google_compute_network.auto_producer_net[0].id
-      project_id = local.effective_consumer_project_id
+      instance_role = "SECONDARY"
+      primary_instance {
+        instance = var.primary_instance_id
+      }
+    }
+  }
+
+  # --- Network endpoint (SHARED_VPC mode only) ---
+  dynamic "desired_auto_created_endpoints" {
+    for_each = var.psc_connectivity_mode == "SHARED_VPC" ? [1] : []
+    content {
+      network    = var.effective_psc_network_id
+      project_id = var.project_id
     }
   }
 
@@ -51,7 +49,7 @@ resource "google_memorystore_instance" "shared-instance" {
   server_ca_pool = var.server_ca_mode == "CUSTOMER_MANAGED_CAS_CA" ? var.server_ca_pool : null
 
   # --- Encryption at rest (CMEK) ---
-  kms_key = var.encryption_type == "CUSTOMER_MANAGED" ? var.kms_key : null
+  kms_key = var.kms_key
 
   # --- Persistence (RDB / AOF / disabled) ---
   persistence_config {
@@ -113,42 +111,42 @@ resource "google_memorystore_instance" "shared-instance" {
   )
 
   # --- Deletion protection ---
+  # This is the real, API-enforced guard (blocks delete via console/gcloud/
+  # API too, not just `terraform destroy`). lifecycle.prevent_destroy is
+  # intentionally NOT used here — it cannot reference variables (must be a
+  # literal bool), which would defeat the point of a reusable module.
   deletion_protection_enabled = var.deletion_protection_enabled
 
-  # Service connection policy only exists in AUTO mode (count 0 or 1) —
-  # referencing the resource without an index is safe either way.
-  depends_on = [
-    google_network_connectivity_service_connection_policy.auto_policy,
-  ]
+  labels = var.labels
 
   lifecycle {
     precondition {
-      condition     = local.valid_location
+      condition     = var.valid_location
       error_message = "location '${var.location}' is not available for project '${var.project_id}'."
     }
 
     precondition {
-      condition     = local.valid_zone_for_single_zone_mode
-      error_message = "Could not resolve a valid zone for SINGLE_ZONE mode in region '${var.location}' for project '${var.project_id}'. Either no zones are available, or the supplied zone '${var.zone_distribution_mode}' is invalid."
+      condition     = var.valid_zone_for_single_zone_mode
+      error_message = "Could not resolve a valid zone for SINGLE_ZONE mode in region '${var.location}' for project '${var.project_id}'."
     }
 
     precondition {
-      condition     = local.valid_shard_count_for_cluster_mode
+      condition     = var.valid_shard_count_for_cluster_mode
       error_message = "shard_count must be 1 when cluster_mode is 'CLUSTER_DISABLED'; Cluster Mode Disabled instances only support a single shard."
     }
 
     precondition {
-      condition     = local.valid_node_type_for_prod
+      condition     = var.valid_node_type_for_prod
       error_message = "SHARED_CORE_NANO has no SLA and is not recommended for production. Use STANDARD_SMALL, HIGHMEM_MEDIUM, or HIGHMEM_XLARGE for environment = 'PROD'."
     }
 
     precondition {
-      condition     = local.valid_custom_node_type_requires_cluster_disabled
+      condition     = var.valid_custom_node_type_requires_cluster_disabled
       error_message = "node_type '${var.node_type}' (CUSTOM_PICO/CUSTOM_MICRO/CUSTOM_MINI) is only available for Cluster Mode Disabled instances. Set cluster_mode = 'CLUSTER_DISABLED', or choose a different node_type for cluster_mode = 'CLUSTER'."
     }
 
     precondition {
-      condition     = local.valid_iam_auth_requires_tls
+      condition     = var.valid_iam_auth_requires_tls
       error_message = "IAM_AUTH sends the AUTH token unencrypted unless in-transit encryption is enabled. Set transit_encryption_mode = 'SERVER_AUTHENTICATION' when using authorization_mode = 'IAM_AUTH'."
     }
   }

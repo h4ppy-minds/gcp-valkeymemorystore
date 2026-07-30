@@ -1,23 +1,10 @@
-variable "project_id" {
+variable "env" {
+  description = "Deployment environment for this TFC workspace: dev, qa, uat, or prd. Selects which environments.<env> block in default.json applies, and filters onboarding request files to this environment only."
   type        = string
-  description = "Project ID"
+  default     = "dev"
+
   validation {
-    condition     = can(regex("^[a-z0-9-]+$", var.project_id))
-    error_message = "Only lowercase letters, numbers and hyphens allowed."
+    condition     = contains(["dev", "qa", "uat", "prd"], var.env)
+    error_message = "env must be one of: dev, qa, uat, prd."
   }
-  default = "valkeyhubhost-500604"
-}
-variable "location" {
-  description = "GCP region where the Memorystore instance will be created (e.g., us-central1, us-east1)"
-  type        = string
-  default     = "us-central1"
-  validation {
-    condition     = contains(data.google_compute_regions.available_regions, var.location)
-    error_message = "Location must be a valid US GCP region supported by Memorystore for Valkey."
-  }
-}
-variable "zone" {
-  description = "Optional zone for SINGLE_ZONE distribution. Leave null to let GCP auto-select."
-  type        = string
-  default     = null
 }

@@ -1,0 +1,22 @@
+{
+  "request_type": "create",
+  "environment": "dev",
+  "requested_by": "platform-team",
+  "instance": {
+    "instance_id": "test-standalone-cache",
+    "cluster_mode": "CLUSTER_DISABLED",
+    "shard_count": 1,
+    "replica_count": 0,
+    "labels": {
+      "team": "platform-demo",
+      "cost_center": "cc-0001",
+      "topology": "standalone",
+      "managed_by": "terraform"
+    },
+    "enable_alerting": false,
+    "appteam_emails": [],
+    "platformteam_emails": [
+      "sifukun23@gmail.com"
+    ]
+  }
+}

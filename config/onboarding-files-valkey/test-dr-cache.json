@@ -1,0 +1,22 @@
+{
+  "request_type": "create",
+  "environment": "dev",
+  "requested_by": "platform-team",
+  "instance": {
+    "instance_id": "test-dr-cache",
+    "replica_count": 1,
+    "cross_region_replica": {
+      "enabled": true
+    },
+    "labels": {
+      "team": "platform-demo",
+      "cost_center": "cc-0003",
+      "topology": "dr",
+      "managed_by": "terraform"
+    },
+    "enable_alerting": true,
+    "appteam_emails": [
+      "app-team-oncall@example.com"
+    ]
+  }
+}
