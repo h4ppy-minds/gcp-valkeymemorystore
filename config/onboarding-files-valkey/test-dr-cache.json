@@ -1,20 +1,27 @@
 {
-  "request_type": "create",
+  "type": "instance",
+  "request_type": "delete",
   "environment": "dev",
   "requested_by": "platform-team",
   "instance": {
-    "instance_id": "test-dr-cache",
+    "name": "test-dr-cache",
+    "shard_count": 1,
     "replica_count": 1,
+    "server_type": "STANDARD_SMALL",
+    "version": "VALKEY_9_0",
+    "authorization_mode": "IAM_AUTH",
+    "transit_encryption_mode": "SERVER_AUTHENTICATION",
     "cross_region_replica": {
       "enabled": true
     },
-    "labels": {
-      "team": "platform-demo",
-      "cost_center": "cc-0003",
-      "topology": "dr",
-      "managed_by": "terraform"
+    "persistence": {
+      "mode": "RDB"
     },
-    "enable_alerting": true,
+    "tags": {
+      "application_id": "platform-demo",
+      "lob": "cc-0003"
+    },
+    "enable_alerting": false,
     "appteam_emails": [
       "app-team-oncall@example.com"
     ]

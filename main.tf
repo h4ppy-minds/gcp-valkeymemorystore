@@ -1,31 +1,19 @@
 ############################################
 # Onboarding root: one JSON file per request under
 # config/onboarding-files-valkey/, merged with global + per-environment
-# defaults in locals.tf, fed into ONE module call per instance.
+# defaults in locals.tf, fed into TWO module calls per instance.
 #
-# This used to call two modules (terraform-google-valkey +
-# terraform-google-valkey-alerting) separately. They're now merged into
-# a single module at ./modules/terraform-google-valkey — alerting is# built in, controlled by enable_alerting / appteam_emails /
-# platformteam_emails on the SAME module call. There is no second
-# module block anymore; module.valkey_alerts is gone, and its outputs
-# now come straight off module.valkey (see output.tf).
+# This used to call one merged module (terraform-google-valkey, with
+# alerting folded in via enable_alerting / appteam_emails /
+# platformteam_emails on the same call). Alerting is a separate module
+# again — modules/terraform-google-h4ppy-memorystore-valkey-alerts — so
+# that an onboarding PR that only edits appteam_emails/platformteam_emails
+# plans and applies just the alerting module, never the instance itself.
+# module.valkey_alerts is back; its outputs no longer come off
+# module.valkey (see output.tf).
 ############################################
-
-locals {
-  # var.env uses "prd" (matching typical TFC workspace naming), but the
-  # valkey module's environment variable validates against "PROD", not
-  # "PRD" — upper(var.env) alone would fail for prd specifically.
-  # Explicit map avoids that mismatch.
-  _env_label = {
-    dev = "DEV"
-    qa  = "QA"
-    uat = "UAT"
-    prd = "PROD"
-  }
-}
-
 module "valkey" {
-  source = "./modules/terraform-google-valkey"
+  source = "./modules/terraform-google-h4ppy-memorystore-valkey"
   #source   = "app.terraform.io/<YOUR_ORG>/valkey/google" # replace <YOUR_ORG>; see REGISTRY_PUBLISHING.md
   #version  = "~> 2.1"
   for_each = local.valkey
@@ -80,10 +68,6 @@ module "valkey" {
   maintenance_start_hour = each.value.maintenance_start_hour
 
   # --- Engine & config parameters ---
-  # These four were previously dropped on the floor here — present in
-  # default.json but never forwarded to the module, so every instance
-  # silently got the module's own internal defaults instead of the
-  # onboarding-layer default.json values. Fixed.
   engine_version          = each.value.engine_version
   maxmemory_policy        = each.value.maxmemory_policy
   notify_keyspace_events  = each.value.notify_keyspace_events
@@ -94,12 +78,39 @@ module "valkey" {
   # --- Deletion protection ---
   deletion_protection_enabled = each.value.deletion_protection_enabled
 
-  # --- Alerting — now part of this same module call (module
-  # "valkey_alerts" no longer exists). Only 3 alerting inputs exist on
-  # the module at all; everything else (thresholds/durations/metric
-  # names) is fixed inside the module's alerts.tf and cannot be
-  # overridden from here. ---
-  enable_alerting     = try(each.value.enable_alerting, null) # null -> module default (true)
+  # Alerting is no longer an input here at all — see module.valkey_alerts
+  # below. Nothing in this block changes if an onboarding PR only touches
+  # appteam_emails / platformteam_emails / enable_alerting.
+}
+
+# --- Alerting: one call per onboarded instance, wired to module.valkey's
+# own outputs rather than back to each.value, so alerting always targets
+# the instance actually created (its real instance_id/location) instead
+# of whatever the request file happened to say. Same for_each key set as
+# module.valkey, so every onboarded instance gets an alerting call —
+# enable_alerting = false (or omitted, defaulting true) still produces
+# the module call, it just no-ops internally. ---
+module "valkey_alerts" {
+  source = "./modules/terraform-google-h4ppy-memorystore-valkey-alerts"
+  #source   = "app.terraform.io/<YOUR_ORG>/valkey-alerts/google" # replace <YOUR_ORG>; see REGISTRY_PUBLISHING.md
+  #version  = "~> 1.0"
+  for_each = local.valkey
+
+  project_id  = each.value.project_id
+  instance_id = module.valkey[each.key].instance_id
+  location    = module.valkey[each.key].resolved_location
+
+  # The module's enable_alerting is non-nullable (default true) — unlike
+  # the old merged module, passing an explicit null here is a type error,
+  # so the "unset -> module default" fallback has to happen on this side
+  # instead: try(..., true), not try(..., null).
+  enable_alerting = try(each.value.enable_alerting, true)
+
   appteam_emails      = try(each.value.appteam_emails, [])
   platformteam_emails = try(each.value.platformteam_emails, [])
+
+  # This module has no visibility into the instance's replica_count (it
+  # isn't the module that creates the instance), so the caller — here —
+  # decides explicitly.
+  enable_replication_lag_alert = try(each.value.replica_count, 0) > 0
 }

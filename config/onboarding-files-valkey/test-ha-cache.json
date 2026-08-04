@@ -1,17 +1,23 @@
 {
-  "request_type": "create",
+  "type": "instance",
+  "request_type": "delete",
   "environment": "dev",
   "requested_by": "platform-team",
   "instance": {
-    "instance_id": "test-ha-cache",
-    "shard_count": 2,
-    "replica_count": 2,
+    "name": "test-ha-cache",
+    "shard_count": 1,
+    "replica_count": 1,
+    "server_type": "STANDARD_SMALL",
+    "version": "VALKEY_9_0",
+    "authorization_mode": "IAM_AUTH",
+    "transit_encryption_mode": "SERVER_AUTHENTICATION",
     "cross_region_replica": false,
-    "labels": {
-      "team": "platform-demo",
-      "cost_center": "cc-0002",
-      "topology": "ha",
-      "managed_by": "terraform"
+    "persistence": {
+      "mode": "AOF"
+    },
+    "tags": {
+      "application_id": "platform-demo",
+      "lob": "cc-0002"
     },
     "enable_alerting": true,
     "appteam_emails": [

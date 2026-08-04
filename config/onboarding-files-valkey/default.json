@@ -1,7 +1,8 @@
 {
   "type": "valkey-onboarding-defaults",
+  "aplication_name": "memorystore-valkey",
   "cluster_mode": "CLUSTER",
-  "node_type": "STANDARD_SMALL",
+  "server_type": "STANDARD_SMALL",
   "shard_count": 1,
   "zone_distribution_mode": "MULTI_ZONE",
   "psc_connectivity_mode": "SHARED_VPC",
@@ -9,19 +10,33 @@
   "transit_encryption_mode": "TRANSIT_ENCRYPTION_DISABLED",
   "server_ca_mode": "GOOGLE_MANAGED_PER_INSTANCE_CA",
   "encryption_type": "GOOGLE_MANAGED",
-  "persistence_mode": "RDB",
-  "rdb_snapshot_period": "TWENTY_FOUR_HOURS",
-  "automated_backup_enabled": true,
-  "automated_backup_start_time_hour": 3,
-  "automated_backup_retention_days": 14,
-  "maintenance_day": "SUNDAY",
-  "maintenance_start_hour": 4,
-  "engine_version": "VALKEY_9_0",
-  "maxmemory_policy": "volatile-lru",
-  "notify_keyspace_events": "KEA",
-  "maxmemory_clients": "10%",
-  "slowlog_log_slower_than": 5000,
-  "maxclients": 5000,
+  "persistence": {
+    "mode": "RDB",
+    "rdb_config": {
+      "rdb_snapshot_period": "TWENTY_FOUR_HOURS"
+    },
+    "aof_config": {
+      "append_fsync": "EVERY_SEC"
+    }
+  },
+  "backup": {
+    "enabled": true,
+    "start_hour": 3,
+    "backup_retention_days": 14
+  },
+  "version": "VALKEY_9_0",
+  "maintenance_window": {
+    "day_of_week": "SUNDAY",
+    "start_hour": 4,
+    "start_minute": 0
+  },
+  "config": {
+    "maxmemory_policy": "volatile-lru",
+    "notify_keyspace_events": "KEA",
+    "maxmemory_clients": "10%",
+    "slowlog_log_slower_than": 5000,
+    "maxclients": 5000
+  },
   "deletion_protection_enabled": false,
   "platformteam_emails": [
     "sifukun23@gmail.com"
@@ -30,8 +45,10 @@
     "dev": {
       "project_id": "valkeyhubhost-500604",
       "location": "us-central1",
-      "shared_vpc_host_project": "net-host-prod-502521",
-      "shared_vpc_network_name": "shared-net",
+      "networking": {
+        "shared_vpc_network_project": "net-host-prod-502521",
+        "shared_vpc_network_name": "shared-net"
+      },
       "cross_region_replica": {
         "location": "us-east1",
         "enabled": false
@@ -40,8 +57,10 @@
     "qa": {
       "project_id": "your-qa-project-id",
       "location": "us-central1",
-      "shared_vpc_host_project": "your-shared-vpc-host-project",
-      "shared_vpc_network_name": "shared-net",
+      "networking": {
+        "shared_vpc_network_project": "net-host-prod-502521",
+        "shared_vpc_network_name": "shared-net"
+      },
       "cross_region_replica": {
         "location": "us-central1",
         "enabled": false
@@ -50,8 +69,10 @@
     "uat": {
       "project_id": "your-uat-project-id",
       "location": "us-central1",
-      "shared_vpc_host_project": "your-shared-vpc-host-project",
-      "shared_vpc_network_name": "shared-net",
+      "networking": {
+        "shared_vpc_network_project": "net-host-prod-502521",
+        "shared_vpc_network_name": "shared-net"
+      },
       "cross_region_replica": {
         "location": "us-west1",
         "enabled": false
@@ -60,8 +81,10 @@
     "prd": {
       "project_id": "your-prod-project-id",
       "location": "us-central1",
-      "shared_vpc_host_project": "your-shared-vpc-host-project-prod",
-      "shared_vpc_network_name": "shared-net-prod",
+      "networking": {
+        "shared_vpc_network_project": "net-host-prod-502521",
+        "shared_vpc_network_name": "shared-net"
+      },
       "cross_region_replica": {
         "location": "us-west1",
         "enabled": false

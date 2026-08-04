@@ -1,22 +1,22 @@
 {
-  "request_type": "create",
+  "type": "instance",
+  "request_type": "delete",
   "environment": "dev",
   "requested_by": "platform-team",
   "instance": {
-    "instance_id": "test-standalone-cache",
+    "name": "test-standalone-cache",
     "cluster_mode": "CLUSTER_DISABLED",
     "shard_count": 1,
     "replica_count": 0,
-    "labels": {
-      "team": "platform-demo",
-      "cost_center": "cc-0001",
-      "topology": "standalone",
-      "managed_by": "terraform"
+    "server_type": "SHARED_CORE_NANO",
+    "version": "VALKEY_9_0",
+    "authorization_mode": "AUTH_DISABLED",
+    "transit_encryption_mode": "TRANSIT_ENCRYPTION_DISABLED",
+    "tags": {
+      "application_id": "platform-demo",
+      "lob": "cc-0001"
     },
     "enable_alerting": false,
-    "appteam_emails": [],
-    "platformteam_emails": [
-      "sifukun23@gmail.com"
-    ]
+    "appteam_emails": []
   }
 }

@@ -2,10 +2,14 @@
 # alerts.tf — everything about alerting: fixed defaults + the logic that
 # builds the alert set and notification channels.
 #
-# By design, this module exposes only THREE alerting variables:
-#   var.enable_alerting       — on/off switch
-#   var.appteam_emails        — required when enabled
-#   var.platformteam_emails   — optional, in addition to appteam_emails
+# By design, this module exposes only these alerting-routing variables
+# (see variables.tf):
+#   var.enable_alerting            — on/off switch
+#   var.appteam_emails             — required when enabled
+#   var.platformteam_emails        — optional, in addition to appteam_emails
+#   var.enable_replication_lag_alert — caller-supplied, since this module
+#                                     doesn't know the target instance's
+#                                     replica_count
 #
 # Every threshold, duration, and metric/resource-type string below is a
 # fixed constant, not a variable — callers cannot pass or override
@@ -19,15 +23,13 @@
 #                            durations, metric/resource type strings).
 #                            Edit values here to change alerting behavior
 #                            for every caller of this module.
-#   2. local.enable_alerting / local.enable_replication_lag_alert —
-#                            resolved on/off state.
-#   3. Notification channel locals — dedupes appteam_emails +
+#   2. Notification channel locals — dedupes appteam_emails +
 #                            platformteam_emails into one channel spec per
 #                            unique address.
-#   4. local.alert_definitions — the table that IS the alert set, fed
-#                            into main.tf's module.alert_policies for_each.
-#                            Adding a new alert means adding one entry
-#                            here; main.tf does not change.
+#   3. local.alert_definitions — the table that IS the alert set, fed
+#                            into main.tf's alert-policy resource
+#                            for_each. Adding a new alert means adding one
+#                            entry here; main.tf does not change.
 ############################################################################
 
 locals {
@@ -71,21 +73,7 @@ locals {
   }
 
   ##########################################################################
-  # 2. On/off state
-  ##########################################################################
-
-  # The only alerting input with a var override — everything else in this
-  # file is a fixed constant.
-  enable_alerting = coalesce(var.enable_alerting, true)
-
-  # Not overridable per caller: on whenever the instance actually has
-  # replicas, off otherwise. (The old module's enable_replication_lag_alert
-  # override variable is intentionally not carried forward — see the
-  # "only toggle + emails" design note at the top of this file.)
-  enable_replication_lag_alert = local.replica_count > 0
-
-  ##########################################################################
-  # 3. Notification channels — no severity split. Every alert this module
+  # 2. Notification channels — no severity split. Every alert this module
   # creates (WARNING or CRITICAL) notifies the same combined set of
   # app-team + platform-team addresses. Cloud Monitoring's "email" channel
   # type only accepts ONE address per channel, so this creates one channel
@@ -93,9 +81,9 @@ locals {
   # every alert policy. Empty (no-op) when enable_alerting = false.
   ##########################################################################
 
-  all_notification_emails = local.enable_alerting ? setunion(var.appteam_emails, var.platformteam_emails) : []
+  all_notification_emails = var.enable_alerting ? setunion(var.appteam_emails, var.platformteam_emails) : []
 
-  notification_channel_specs = local.enable_alerting ? { for email in local.all_notification_emails : email => {
+  notification_channel_specs = var.enable_alerting ? { for email in local.all_notification_emails : email => {
     email        = email
     display_name = "Valkey Alerts - ${email}"
   } } : {}
@@ -105,7 +93,7 @@ locals {
   ]
 
   ##########################################################################
-  # 4. Alert definitions — this table IS the alert set. Each entry is fed
+  # 3. Alert definitions — this table IS the alert set. Each entry is fed
   # into one instantiation of module/_alert_policy (see main.tf), the same
   # way module/_instance is called once per instance instead of hand-
   # duplicating the resource. Adding a new alert means adding one map
@@ -113,10 +101,10 @@ locals {
   # enable_alerting = false.
   ##########################################################################
 
-  alert_definitions = local.enable_alerting ? merge(
+  alert_definitions = var.enable_alerting ? merge(
     {
       instance_down = {
-        display_name              = "[CRITICAL][${local.location}] Valkey instance node unhealthy"
+        display_name              = "[CRITICAL][${var.location}] Valkey instance node unhealthy"
         condition_display_name    = "Node health check failing"
         severity                  = "CRITICAL"
         resource_type             = local.alert_defaults.resource_type_instance_node
@@ -136,7 +124,7 @@ locals {
       }
 
       cpu_warning = {
-        display_name              = "[WARNING][${local.location}] Valkey CPU utilization high"
+        display_name              = "[WARNING][${var.location}] Valkey CPU utilization high"
         condition_display_name    = "CPU maximum_utilization > ${local.alert_defaults.cpu_warning_threshold}"
         severity                  = "WARNING"
         resource_type             = local.alert_defaults.resource_type_instance
@@ -156,7 +144,7 @@ locals {
       }
 
       cpu_critical = {
-        display_name              = "[CRITICAL][${local.location}] Valkey CPU utilization critical"
+        display_name              = "[CRITICAL][${var.location}] Valkey CPU utilization critical"
         condition_display_name    = "CPU maximum_utilization > ${local.alert_defaults.cpu_critical_threshold}"
         severity                  = "CRITICAL"
         resource_type             = local.alert_defaults.resource_type_instance
@@ -176,7 +164,7 @@ locals {
       }
 
       memory_warning = {
-        display_name              = "[WARNING][${local.location}] Valkey memory utilization high"
+        display_name              = "[WARNING][${var.location}] Valkey memory utilization high"
         condition_display_name    = "Memory maximum_utilization > ${local.alert_defaults.memory_warning_threshold}"
         severity                  = "WARNING"
         resource_type             = local.alert_defaults.resource_type_instance
@@ -196,7 +184,7 @@ locals {
       }
 
       memory_critical = {
-        display_name              = "[CRITICAL][${local.location}] Valkey memory utilization critical"
+        display_name              = "[CRITICAL][${var.location}] Valkey memory utilization critical"
         condition_display_name    = "Memory maximum_utilization > ${local.alert_defaults.memory_critical_threshold}"
         severity                  = "CRITICAL"
         resource_type             = local.alert_defaults.resource_type_instance
@@ -216,7 +204,7 @@ locals {
       }
 
       rejected_connections_warning = {
-        display_name              = "[WARNING][${local.location}] Valkey rejected connections detected"
+        display_name              = "[WARNING][${var.location}] Valkey rejected connections detected"
         condition_display_name    = "rejected_connections_count > ${local.alert_defaults.rejected_connections_warning_threshold}"
         severity                  = "WARNING"
         resource_type             = local.alert_defaults.resource_type_instance_node
@@ -236,7 +224,7 @@ locals {
       }
 
       rejected_connections_critical = {
-        display_name              = "[CRITICAL][${local.location}] Valkey rejected connections critical"
+        display_name              = "[CRITICAL][${var.location}] Valkey rejected connections critical"
         condition_display_name    = "rejected_connections_count > ${local.alert_defaults.rejected_connections_critical_threshold}"
         severity                  = "CRITICAL"
         resource_type             = local.alert_defaults.resource_type_instance_node
@@ -256,7 +244,7 @@ locals {
       }
 
       connected_clients_high = {
-        display_name              = "[WARNING][${local.location}] Valkey connected clients elevated"
+        display_name              = "[WARNING][${var.location}] Valkey connected clients elevated"
         condition_display_name    = "connected_clients > ${local.alert_defaults.connected_clients_warning_threshold}"
         severity                  = "WARNING"
         resource_type             = local.alert_defaults.resource_type_instance_node
@@ -275,11 +263,11 @@ locals {
         auto_close                = null
       }
     },
-    # Only added to the map when applicable — module.alert_policies (a
-    # for_each over this map) simply won't create it otherwise.
-    local.enable_replication_lag_alert ? {
+    # Only added to the map when applicable — the alert-policy resource's
+    # for_each over this map simply won't create it otherwise.
+    var.enable_replication_lag_alert ? {
       replication_lag = {
-        display_name              = "[WARNING][${local.location}] Valkey replication lag high"
+        display_name              = "[WARNING][${var.location}] Valkey replication lag high"
         condition_display_name    = "maximum_offset_diff > ${local.alert_defaults.replication_lag_warning_bytes} bytes"
         severity                  = "WARNING"
         resource_type             = local.alert_defaults.resource_type_instance

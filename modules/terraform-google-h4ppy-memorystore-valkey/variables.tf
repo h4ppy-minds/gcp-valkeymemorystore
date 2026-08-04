@@ -45,7 +45,7 @@ variable "secondary_location" {
 
 # --- REQUIRED ---
 variable "project_id" {
-  description = "GCP project ID where the Memorystore for Valkey instance (and, when enable_alerting = true, its alert policies + notification channels) are created. Required — no default, to prevent accidentally deploying into a placeholder project."
+  description = "GCP project ID where the Memorystore for Valkey instance is created. Required — no default, to prevent accidentally deploying into a placeholder project."
   type        = string
 
   validation {
@@ -68,7 +68,7 @@ variable "environment" {
 # --- OPTIONAL ---
 variable "instance_id" {
   type        = string
-  description = "Permanent, unique identifier for this instance. Becomes the final component of the instance's resource name, and (when enable_alerting = true) the instance the alert policies filter on. Immutable after creation."
+  description = "Permanent, unique identifier for this instance. Becomes the final component of the instance's resource name. Immutable after creation."
   default     = null
   nullable    = true
 
@@ -182,7 +182,7 @@ variable "shard_count" {
 
 # --- OPTIONAL ---
 variable "replica_count" {
-  description = "Number of replica nodes per shard. 0-5. Also drives whether the replication-lag alert is created by default when enable_alerting = true (see enable_replication_lag_alert)."
+  description = "Number of replica nodes per shard. 0-5. If you're also using terraform-google-valkey-alerts, pass replica_count > 0 as that module's enable_replication_lag_alert input to turn on the replication-lag alert."
   type        = number
   default     = null
   nullable    = true
@@ -567,51 +567,17 @@ variable "deletion_protection_enabled" {
 }
 
 ############################################
-# Alerting — toggle + notification routing
+# Alerting
 #
-# Everything below wires up Cloud Monitoring alert policies + email
-# notification channels for the instance this module creates. This used
-# to be a second, separately-called module (valkey-alerting); it is now
-# folded in here so one module call produces both the instance and its
-# alerting, and enable_alerting is the only thing you flip to opt out.
+# This module only provisions the Valkey instance. Cloud Monitoring
+# alert policies and email notification channels live in a separate
+# module — terraform-google-valkey-alerts — wired up against this
+# module's `instance_id` / `resolved_location` outputs. That split is
+# deliberate: updating who gets emailed about an alert (adding/removing
+# an address) should never require a plan/apply against this instance's
+# infrastructure, and shouldn't need to go through whatever change
+# process governs the instance itself. See that module's README.
 ############################################
-
-# --- OPTIONAL ---
-variable "enable_alerting" {
-  type        = bool
-  description = "Whether this module also creates Cloud Monitoring alert policies + email notification channels for the instance. Defaults to true (see alerts.tf). Set to false if you want the instance only, e.g. alerting is managed elsewhere for this environment."
-  default     = null
-  nullable    = true
-}
-
-# --- OPTIONAL to Terraform, but CONDITIONALLY REQUIRED: must be non-empty
-# whenever enable_alerting = true (enforced by the
-# alerting_requires_appteam_emails check block below, not by Terraform's
-# built-in required-variable check, since Terraform variables can't
-# natively express "required only if some other value is true"). ---
-variable "appteam_emails" {
-  type        = set(string)
-  description = "App team's email addresses — every one of these gets notified on every alert this module creates, regardless of severity. set(string) because order doesn't matter and duplicates are meaningless here. Required when enable_alerting = true (see the alerting_requires_appteam_emails check) — an alert with nowhere to go is a silent outage."
-  default     = []
-  nullable    = false
-}
-
-# --- OPTIONAL ---
-variable "platformteam_emails" {
-  type        = set(string)
-  description = "Platform/on-call team's email addresses — notified on every alert alongside appteam_emails. Optional; leave empty if you don't have a standing platform list yet."
-  default     = []
-  nullable    = false
-}
-
-# Every threshold, duration, and metric/resource-type string for alerting
-# — plus which alerts exist and the replication-lag on/off rule — used to
-# be overridable here too. They are intentionally NOT exposed as
-# variables anymore: this module's alerting is meant to be "on with
-# good defaults, or off" — not individually retuned per caller. All of
-# that now lives in alerts.tf (local.alert_defaults + local.alert_definitions).
-# Edit alerts.tf directly if a threshold genuinely needs to change; there
-# is no variable for it.
 
 ############################################
 # Cross-field checks — these validate combinations of EFFECTIVE
@@ -697,9 +663,4 @@ check "persistence_config_consistency" {
   }
 }
 
-check "alerting_requires_appteam_emails" {
-  assert {
-    condition     = !local.enable_alerting || length(var.appteam_emails) > 0
-    error_message = "enable_alerting = true requires at least one address in appteam_emails — an alert with nowhere to go is a silent outage. Set enable_alerting = false if you don't want alerting from this module call."
-  }
-}
+

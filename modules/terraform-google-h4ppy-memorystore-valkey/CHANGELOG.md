@@ -14,6 +14,63 @@ matching `vMAJOR.MINOR.PATCH`.
 > feature set rather than as a breaking change between published
 > versions.
 
+## [2.0.0] - 2026-08-03
+
+### Changed — BREAKING
+- **Alerting removed from this module entirely.** `enable_alerting`,
+  `appteam_emails`, `platformteam_emails`, the
+  `alerting_requires_appteam_emails` check, and every alerting output
+  (`alerting_enabled`, `notification_channel_ids`,
+  `replication_lag_alert_enabled`, `alert_policy_ids`) are gone. Cloud
+  Monitoring alert policies + email notification channels are now a
+  separate module — `terraform-google-valkey-alerts` — that you call
+  independently against this module's `instance_id` /
+  `resolved_location` outputs.
+
+  This reverses the 1.0.0 consolidation. The reason: with alerting
+  folded into this module, adding or removing a single notification
+  email required a plan/apply against the instance itself — which meant
+  an email-list change went through the same change-ticket process as
+  an infrastructure change. Splitting them apart means the email list
+  can change on its own, independently of the instance.
+
+- **No more nested submodules.** `module/_instance` and
+  `module/_alert_policy` are gone; `google_memorystore_instance.primary`
+  and `google_memorystore_instance.secondary` are now resources declared
+  directly in this module's root `main.tf`. Registry modules should be
+  flat/self-contained — everything a consumer needs to read is now in
+  one directory instead of spread across `module/`.
+
+- **Resource addresses changed** as a direct result of flattening:
+  - `module.primary` → `google_memorystore_instance.primary`
+  - `module.secondary[0]` → `google_memorystore_instance.secondary[0]`
+
+  Existing state referencing the old `module.primary...` /
+  `module.secondary...` addresses needs `terraform state mv` (or an
+  equivalent `moved` block in your root config) before applying this
+  version, or Terraform will plan to destroy and recreate the instance.
+  Suggested commands, run from the calling root module:
+  ```
+  terraform state mv 'module.valkey.module.primary.google_memorystore_instance.this' \
+    'module.valkey.google_memorystore_instance.primary'
+  terraform state mv 'module.valkey.module.secondary[0].google_memorystore_instance.this' \
+    'module.valkey.google_memorystore_instance.secondary[0]'
+  ```
+  (adjust the `module.valkey.` prefix to whatever you named the module
+  call). If you had `enable_alerting = true`, also import the
+  now-separate alert resources into a new
+  `terraform-google-valkey-alerts` module call, or accept that Terraform
+  will destroy them here and the new module will recreate them under
+  new addresses — the underlying `google_monitoring_alert_policy` /
+  `google_monitoring_notification_channel` resources are identical, so
+  this is a Terraform-state-only move if you'd rather not recreate them
+  (see that module's CHANGELOG for the target addresses).
+
+### Added
+- `resolved_location` output — the effective region the primary
+  instance was created in, meant to be passed straight into
+  `terraform-google-valkey-alerts`' `location` input.
+
 ## [1.0.0] - 2026-07-30
 
 ### Added

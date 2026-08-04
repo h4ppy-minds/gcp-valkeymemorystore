@@ -1,15 +1,13 @@
 ############################################################################
 # all-locals.tf — THE file to edit when you want to change a Valkey
 # INSTANCE default (topology, sizing, persistence, auth/TLS/CA, backups,
-# maintenance, engine config). This module's variables are, by design,
-# almost entirely about the instance — see variables.tf.
+# maintenance, engine config). This module's variables are entirely about
+# the instance — no alerting lives here at all.
 #
-# Alerting defaults and logic live in a separate file, alerts.tf. That
-# split is deliberate: this module only exposes enable_alerting,
-# appteam_emails, and platformteam_emails as alerting variables — every
-# threshold, duration, and metric name is fixed in alerts.tf and is not
-# meant to be overridden per caller. Keeping them in a separate file makes
-# that boundary obvious just from the file list.
+# Alerting (Cloud Monitoring alert policies + email notification
+# channels) is a separate module — terraform-google-valkey-alerts — kept
+# out of this one on purpose: changing a notification email address
+# shouldn't require planning/applying this module's infrastructure.
 #
 # Layout of this file, top to bottom:
 #   1. local.defaults      — every literal instance default value, in one
@@ -24,10 +22,10 @@
 #                            local.defaults.
 #   3. Derived locals       — values computed FROM the effective values
 #                            above (zone resolution, precondition
-#                            booleans for module/_instance's lifecycle
-#                            block). Not "defaults" themselves, just
-#                            logic, but they live here too so the
-#                            instance's behavior is readable from one file.
+#                            booleans for main.tf's lifecycle blocks).
+#                            Not "defaults" themselves, just logic, but
+#                            they live here too so the instance's
+#                            behavior is readable from one file.
 ############################################################################
 
 locals {
@@ -150,7 +148,7 @@ locals {
     local.psc_connectivity_mode == "SHARED_VPC" ? try(data.google_compute_network.shared_vpc_net[0].id, null) : null
   )
 
-  # --- Precondition helpers (see module/_instance/main.tf lifecycle block) ---
+  # --- Precondition helpers (see main.tf lifecycle blocks) ---
   valid_location = contains(data.google_compute_regions.available_regions.names, local.location)
 
   valid_zone_for_single_zone_mode = (
