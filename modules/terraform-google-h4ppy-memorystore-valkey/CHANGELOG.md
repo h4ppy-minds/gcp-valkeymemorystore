@@ -14,6 +14,26 @@ matching `vMAJOR.MINOR.PATCH`.
 > feature set rather than as a breaking change between published
 > versions.
 
+## [3.0.0] - 2026-08-04
+
+### Changed — BREAKING
+- **`authorization_mode` and `transit_encryption_mode` no longer accept
+  insecure values.** `authorization_mode` must now be `IAM_AUTH` (or
+  unset); `AUTH_DISABLED` is rejected by variable validation.
+  `transit_encryption_mode` must now be `SERVER_AUTHENTICATION` (or
+  unset); `TRANSIT_ENCRYPTION_DISABLED` is rejected. Both were already
+  this module's *defaults* — this change removes the ability to
+  override away from them. Any caller currently passing
+  `authorization_mode = "AUTH_DISABLED"` or `transit_encryption_mode =
+  "TRANSIT_ENCRYPTION_DISABLED"` explicitly will get a plan-time
+  validation error and must remove that override (or the instance
+  itself needs to be recreated with authentication/TLS enabled, which is
+  a real change to the running instance — coordinate with whoever owns
+  it before applying).
+- Rationale: every instance this module creates now requires client
+  authentication and in-transit encryption, full stop. There is no
+  supported way to opt out.
+
 ## [2.0.0] - 2026-08-03
 
 ### Changed — BREAKING

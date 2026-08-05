@@ -1,0 +1,307 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://internal/schemas/valkey-onboarding-request.json",
+  "title": "Valkey Onboarding Request",
+  "description": "Schema for one onboarding request file consumed by the Terraform root under config/onboarding-files-valkey/*.json. This is the exact shape the UI/wrapper API must produce — every field name, nesting level, and allowed value here is read verbatim by locals.tf. Fields not listed here are ignored by Terraform even if present. This file is a reference for the UI team, not itself read by Terraform.",
+  "type": "object",
+  "required": ["request_type", "environment", "requested_by", "instance"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "instance",
+      "description": "Structural marker. Always the literal string \"instance\". Not used by Terraform (filtered by filename, not this field), but keep it for consistency with default.json's own \"type\" marker."
+    },
+    "request_type": {
+      "type": "string",
+      "enum": ["create", "delete"],
+      "description": "\"create\" covers BOTH creating a new instance and updating an existing one — there is no separate \"update\" value. To change an existing instance, resubmit the same file with the same instance.name and the changed field(s). \"delete\" removes the instance from the next Terraform apply; the instance object can be left in place as a historical record."
+    },
+    "environment": {
+      "type": "string",
+      "enum": ["dev", "qa", "uat", "prod"],
+      "description": "Which environment this request applies to. Must match one of default.json's environments.<env> keys exactly. Determines project_id, default location, and Shared VPC network — and also becomes this instance's `environment` GCP label automatically (the UI does not need a separate field for that label)."
+    },
+    "requested_by": {
+      "type": "string",
+      "description": "Free-text requester identity (e.g. team name, username). Not validated or used by Terraform beyond being stored in the request file; purely a paper trail.",
+      "examples": ["platform-team", "jane.doe@example.com"]
+    },
+    "instance": {
+      "$ref": "#/$defs/instance"
+    }
+  },
+
+  "$defs": {
+    "instance": {
+      "type": "object",
+      "required": ["name", "shard_count", "replica_count", "server_type", "version"],
+      "properties": {
+
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,55}[a-z0-9]$",
+          "description": "Base name for the instance. Terraform appends \"-<environment>\" automatically to build the real GCP instance ID (e.g. \"my-cache\" + dev -> \"my-cache-dev\") — do NOT include the environment in this field. MUST be unique across every request file targeting the same environment; two files with the same name silently collide and only one instance gets created. Keep it short: the GCP instance_id limit is 63 chars total and the environment suffix (\"-dev\"/\"-qa\"/\"-uat\"/\"-prod\", up to 5 chars) is added on top of this value, so the practical max for `name` here is ~56 chars.",
+          "examples": ["my-cache", "checkout-session-cache"]
+        },
+
+        "location": {
+          "type": "string",
+          "description": "GCP region for the PRIMARY instance, e.g. \"us-central1\". Optional — omit to use the environment's default location (default.json.environments.<env>.location). Any region actually available to the target GCP project is accepted (validated dynamically against the project at plan time, not against a fixed list here). Only matters for DR: cross-region replication is currently only supported between the specific pairs listed in default.json.dr_region_pairs (see cross_region_replica below) — picking a primary location outside a supported pair while cross_region_replica = true fails validation.",
+          "default": "<environment's default location from default.json>",
+          "examples": ["us-central1", "us-east1"]
+        },
+
+        "cluster_mode": {
+          "type": "string",
+          "enum": ["CLUSTER", "CLUSTER_DISABLED"],
+          "default": "CLUSTER",
+          "description": "CLUSTER_DISABLED instances are permanently capped at shard_count = 1 and can never grow past it (immutable on the underlying GCP resource — there's no migration path other than creating a new instance). Pick CLUSTER unless you're certain a single shard is permanent for this workload."
+        },
+        "shard_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 125,
+          "default": 1,
+          "description": "Number of shards. Must be exactly 1 when cluster_mode = CLUSTER_DISABLED. Determines total memory capacity."
+        },
+        "replica_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5,
+          "default": 0,
+          "description": "Replica nodes per shard. replica_count > 0 (with cross_region_replica = false) makes this an HA instance and automatically enables the replication-lag alert — no separate field for that."
+        },
+        "server_type": {
+          "type": "string",
+          "enum": [
+            "SHARED_CORE_NANO",
+            "CUSTOM_PICO",
+            "CUSTOM_MICRO",
+            "CUSTOM_MINI",
+            "HIGHMEM_MEDIUM",
+            "HIGHCPU_MEDIUM",
+            "HIGHMEM_XLARGE",
+            "STANDARD_SMALL",
+            "STANDARD_LARGE",
+            "HIGHMEM_2XLARGE"
+          ],
+          "description": "Node machine type. SHARED_CORE_NANO has no SLA and is blocked outright for environment = prod. CUSTOM_PICO/CUSTOM_MICRO/CUSTOM_MINI are only valid when cluster_mode = CLUSTER_DISABLED.",
+          "x-notes": "No module-wide default — the UI should require an explicit choice, or default.json.server_type (\"STANDARD_SMALL\") is used if omitted."
+        },
+        "version": {
+          "type": "string",
+          "enum": ["VALKEY_7_2", "VALKEY_8_0", "VALKEY_9_0"],
+          "description": "Valkey engine version. Immutable after creation. Confirm current GA versions before exposing a value here — Google adds new versions over time and this list can go stale."
+        },
+
+        "zone_distribution_mode": {
+          "type": "string",
+          "enum": ["SINGLE_ZONE", "MULTI_ZONE"],
+          "default": "MULTI_ZONE",
+          "description": "MULTI_ZONE survives a single-zone outage and is recommended for anything beyond dev/test."
+        },
+        "zone": {
+          "type": "string",
+          "description": "Specific zone within `location` for SINGLE_ZONE mode. Optional; auto-selected if omitted.",
+          "examples": ["us-central1-a"]
+        },
+        "secondary_zone": {
+          "type": "string",
+          "description": "Same as `zone`, but for the DR secondary instance. Only relevant when cross_region_replica = true and zone_distribution_mode = SINGLE_ZONE."
+        },
+
+        "psc_connectivity_mode": {
+          "type": "string",
+          "enum": ["NONE", "SHARED_VPC"],
+          "default": "SHARED_VPC",
+          "description": "NONE = no network connectivity configured by Terraform (something else must wire it up). SHARED_VPC = attach to the environment's existing Shared VPC (network/project come from default.json, never from the request)."
+        },
+        "existing_scp_name": {
+          "type": "string",
+          "description": "Only relevant for advanced SHARED_VPC setups with a non-default Service Connection Policy name. Almost never set by a normal request; omit unless the platform team says otherwise."
+        },
+
+        "server_ca_pool": {
+          "type": "string",
+          "description": "Full CA pool resource ID. Only required if server_ca_mode were CUSTOMER_MANAGED_CAS_CA — which this template does not currently expose as a request-settable field (server_ca_mode comes from default.json). Leave unset for normal requests.",
+          "x-notes": "Present in the schema for completeness; not exposed as a UI field today."
+        },
+        "encryption_type": {
+          "type": "string",
+          "enum": ["GOOGLE_MANAGED", "CUSTOMER_MANAGED"],
+          "default": "GOOGLE_MANAGED",
+          "description": "CUSTOMER_MANAGED (CMEK) requires kms_key to also be set."
+        },
+        "kms_key": {
+          "type": "string",
+          "description": "Full Cloud KMS key resource ID. Required only when encryption_type = CUSTOMER_MANAGED.",
+          "examples": ["projects/PROJECT/locations/REGION/keyRings/RING/cryptoKeys/KEY"]
+        },
+
+        "authorization_mode": {
+          "description": "NOT a request field. Every instance is created with IAM_AUTH — enforced by the Terraform module itself (validation rejects any other value); there is no override. Do not expose this as a UI field.",
+          "x-not-settable": true
+        },
+        "transit_encryption_mode": {
+          "description": "NOT a request field. Every instance is created with SERVER_AUTHENTICATION (TLS) — enforced by the Terraform module itself; there is no override. Do not expose this as a UI field.",
+          "x-not-settable": true
+        },
+
+        "cross_region_replica": {
+          "type": "boolean",
+          "default": false,
+          "description": "Plain true/false — NOT an object. When true, this becomes a DR (cross-region) instance and a secondary is created automatically in whichever region is paired with `location` in default.json.dr_region_pairs. There is no field for picking the secondary region directly — it's fully derived from the primary `location`. Requesting true from a `location` with no configured pair fails plan-time validation with a clear error; check default.json.dr_region_pairs (or ask the platform team) for the currently supported primary regions before offering this toggle in the UI for a given `location`."
+        },
+
+        "persistence": {
+          "type": "object",
+          "description": "All sub-fields are optional and merged individually against default.json's persistence block — you can set just `mode` and still inherit the matching rdb_config/aof_config default.",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["RDB", "AOF", "DISABLED"],
+              "default": "RDB"
+            },
+            "rdb_config": {
+              "type": "object",
+              "description": "Only meaningful when mode = RDB.",
+              "properties": {
+                "rdb_snapshot_period": {
+                  "type": "string",
+                  "enum": ["ONE_HOUR", "SIX_HOURS", "TWELVE_HOURS", "TWENTY_FOUR_HOURS"],
+                  "default": "TWENTY_FOUR_HOURS"
+                }
+              }
+            },
+            "aof_config": {
+              "type": "object",
+              "description": "Only meaningful when mode = AOF.",
+              "properties": {
+                "append_fsync": {
+                  "type": "string",
+                  "enum": ["ALWAYS", "EVERY_SEC", "NO"],
+                  "default": "EVERY_SEC"
+                }
+              }
+            }
+          }
+        },
+
+        "backup": {
+          "type": "object",
+          "description": "All sub-fields optional, merged individually against default.json's backup block.",
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "start_hour": { "type": "integer", "minimum": 0, "maximum": 23, "default": 3, "description": "UTC hour the daily automated backup window begins." },
+            "backup_retention_days": { "type": "integer", "minimum": 1, "maximum": 365, "default": 14 }
+          }
+        },
+
+        "maintenance_window": {
+          "type": "object",
+          "description": "All sub-fields optional, merged individually against default.json's maintenance_window block.",
+          "properties": {
+            "day_of_week": {
+              "type": "string",
+              "enum": ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"],
+              "default": "SUNDAY"
+            },
+            "start_hour": { "type": "integer", "minimum": 0, "maximum": 23, "default": 4, "description": "UTC hour the weekly maintenance window begins." },
+            "start_minute": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 59,
+              "default": 0,
+              "description": "Accepted by the schema for forward-compatibility but currently has NO EFFECT — Terraform's maintenance window is hour-granularity only. The UI may still collect it, but should not imply it's honored yet."
+            }
+          }
+        },
+
+        "config": {
+          "type": "object",
+          "description": "Valkey engine config parameters. All sub-fields optional, merged individually against default.json's config block.",
+          "properties": {
+            "maxmemory_policy": {
+              "type": "string",
+              "enum": ["noeviction", "allkeys-lfu", "allkeys-lru", "volatile-lfu", "volatile-lru", "allkeys-random", "volatile-random", "volatile-ttl"],
+              "default": "volatile-lru"
+            },
+            "notify_keyspace_events": {
+              "type": "string",
+              "default": "",
+              "description": "Keyspace notification classes, e.g. \"Ex\" (expired-key events only) or \"KEA\" (all events). Empty string disables notifications. Free-form per Valkey's notify-keyspace-events syntax, not a fixed enum — validate against that syntax client-side if possible, Terraform does not."
+            },
+            "maxmemory_clients": {
+              "type": "string",
+              "default": "10%",
+              "description": "Percentage (e.g. \"10%\") or absolute value (e.g. \"100mb\").",
+              "examples": ["10%", "100mb"]
+            },
+            "slowlog_log_slower_than": {
+              "type": "integer",
+              "default": 5000,
+              "description": "Microseconds. -1 disables, 0 logs everything (expensive)."
+            },
+            "maxclients": {
+              "type": "integer",
+              "default": 5000,
+              "description": "Maximum simultaneous client connections."
+            }
+          }
+        },
+
+        "deletion_protection_enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, GCP itself blocks deletion of the instance (at the API level — not just a Terraform-side guard). Must be explicitly set back to false in a prior apply before a delete request can succeed."
+        },
+
+        "application_id": {
+          "type": "string",
+          "description": "Instance-level field (NOT nested under `tags`). Always becomes the `application_id` GCP label. Optional — falls back to default.json's `aplication_name` (note: that's the exact field name in default.json, a pre-existing typo upstream, not something the UI needs to replicate) if omitted.",
+          "examples": ["platform-demo", "checkout-service"]
+        },
+        "lob": {
+          "type": "string",
+          "description": "Instance-level field (NOT nested under `tags`). Always becomes the `lob` (line of business / cost center) GCP label if provided. No default — omitted entirely from labels if not set.",
+          "examples": ["cc-0001"]
+        },
+        "tags": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "OPTIONAL free-form extra labels, entirely at the requester's discretion — anything set here is appended to the instance's GCP labels alongside application_id/lob. Most requests can omit this entirely. GCP label VALUE constraints apply to both keys and values: lowercase letters, digits, underscores, and hyphens only (no uppercase, spaces, '@', or '.') — the UI should validate/lowercase input before submitting, since Terraform will fail plan on an invalid label rather than silently fixing it. Do NOT put `topology`, `environment`, or `managed_by` in here — those three keys are always overwritten by Terraform-derived values regardless of what's sent, so a UI should either omit them as options or grey them out.",
+          "examples": [{ "criticality": "high" }, { "pod": "team-alpha", "cost-optimization": "enabled" }]
+        },
+
+        "enable_alerting": {
+          "type": "boolean",
+          "default": true,
+          "description": "Master alerting on/off switch for this instance."
+        },
+        "appteam_emails": {
+          "type": "array",
+          "items": { "type": "string", "format": "email" },
+          "default": [],
+          "description": "REQUIRED to be non-empty whenever enable_alerting is true (or omitted, since true is the default) — Terraform plan fails otherwise with a clear error. The UI should enforce this client-side too: don't let a submission through with enable_alerting checked and this list empty."
+        },
+        "platformteam_emails": {
+          "type": "array",
+          "items": { "type": "string", "format": "email" },
+          "description": "Optional, in addition to appteam_emails. Falls back to default.json's platformteam_emails (the standing platform on-call list) if omitted — most requests should leave this unset rather than repeating the standing list."
+        }
+      }
+    }
+  },
+
+  "x-fields-never-in-request": {
+    "description": "These are computed entirely by Terraform and must never be exposed as UI inputs, even read-only ones that echo a value back — showing them invites someone to eventually try to set them.",
+    "fields": [
+      "instance_id (the full, environment-suffixed GCP resource name — derived from name + environment)",
+      "deployment_topology (derived from replica_count + cross_region_replica: STANDALONE / HA / DR)",
+      "secondary_location (derived from location via dr_region_pairs, only when cross_region_replica = true)",
+      "rdb_snapshot_start_time (computed once at first apply so it never drifts)",
+      "labels.topology / labels.environment / labels.managed_by (always overwritten by Terraform even if present in tags)",
+      "authorization_mode / transit_encryption_mode (hard-fixed by the Terraform module to IAM_AUTH / SERVER_AUTHENTICATION)"
+    ]
+  }
+}

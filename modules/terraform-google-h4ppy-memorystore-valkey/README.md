@@ -46,6 +46,16 @@ generally shouldn't nest submodules a consumer never calls directly —
 everything relevant to using or auditing this module should be readable
 from its root path.
 
+## Auth and TLS are mandatory, not defaults
+
+`authorization_mode` and `transit_encryption_mode` accept exactly one
+value each — `IAM_AUTH` and `SERVER_AUTHENTICATION` respectively (or
+leave them unset, which resolves to the same thing). Variable validation
+rejects `AUTH_DISABLED` and `TRANSIT_ENCRYPTION_DISABLED` outright; there
+is no supported way to create an unauthenticated or unencrypted instance
+with this module. See `CHANGELOG.md`'s `3.0.0` entry if you're migrating
+a caller that previously overrode either of these.
+
 ## The "one file for defaults" design
 
 Every tunable default value in this module lives in exactly one file,

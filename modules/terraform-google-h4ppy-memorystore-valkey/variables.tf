@@ -263,26 +263,26 @@ variable "existing_scp_name" {
 # --- OPTIONAL ---
 variable "authorization_mode" {
   type        = string
-  description = "Client authentication mode. AUTH_DISABLED = no authentication (anyone on the authorized network can connect — never use in production). IAM_AUTH = clients authenticate using short-lived IAM access tokens, integrated with Cloud IAM roles/audit logs."
+  description = "Client authentication mode. IAM_AUTH is the only value this module accepts — clients authenticate using short-lived IAM access tokens, integrated with Cloud IAM roles/audit logs. There is no supported way to disable authentication through this module: leave this unset to get IAM_AUTH by default, or set it explicitly to IAM_AUTH for clarity in state/plan output. AUTH_DISABLED is not offered, even though it's a valid value on the underlying google_memorystore_instance resource — every instance this module creates requires authentication."
   default     = null
   nullable    = true
 
   validation {
-    condition     = var.authorization_mode == null || contains(["AUTH_DISABLED", "IAM_AUTH"], var.authorization_mode)
-    error_message = "authorization_mode must be one of: AUTH_DISABLED, IAM_AUTH."
+    condition     = var.authorization_mode == null || var.authorization_mode == "IAM_AUTH"
+    error_message = "authorization_mode must be IAM_AUTH (or unset, which defaults to IAM_AUTH) — this module does not support AUTH_DISABLED. Every instance created by this module requires client authentication; there is no override for this."
   }
 }
 
 # --- OPTIONAL ---
 variable "transit_encryption_mode" {
   type        = string
-  description = "In-transit (TLS) encryption mode. TRANSIT_ENCRYPTION_DISABLED = plaintext. SERVER_AUTHENTICATION = TLS enabled, client verifies server identity via CA cert. Required when authorization_mode = IAM_AUTH, since IAM tokens are otherwise sent unencrypted."
+  description = "In-transit (TLS) encryption mode. SERVER_AUTHENTICATION is the only value this module accepts — TLS enabled, client verifies server identity via CA cert. There is no supported way to disable TLS through this module: leave this unset to get SERVER_AUTHENTICATION by default, or set it explicitly for clarity in state/plan output. TRANSIT_ENCRYPTION_DISABLED is not offered, even though it's a valid value on the underlying google_memorystore_instance resource — combined with authorization_mode always being IAM_AUTH, disabling TLS would send IAM access tokens over the wire in plaintext."
   default     = null
   nullable    = true
 
   validation {
-    condition     = var.transit_encryption_mode == null || contains(["TRANSIT_ENCRYPTION_DISABLED", "SERVER_AUTHENTICATION"], var.transit_encryption_mode)
-    error_message = "transit_encryption_mode must be one of: TRANSIT_ENCRYPTION_DISABLED, SERVER_AUTHENTICATION."
+    condition     = var.transit_encryption_mode == null || var.transit_encryption_mode == "SERVER_AUTHENTICATION"
+    error_message = "transit_encryption_mode must be SERVER_AUTHENTICATION (or unset, which defaults to SERVER_AUTHENTICATION) — this module does not support TRANSIT_ENCRYPTION_DISABLED. authorization_mode is always IAM_AUTH in this module, and IAM access tokens sent without TLS are exposed in plaintext; there is no override for this."
   }
 }
 
@@ -615,6 +615,11 @@ check "shared_vpc_inputs_present" {
 }
 
 check "iam_auth_requires_tls" {
+  # Belt-and-suspenders: authorization_mode and transit_encryption_mode
+  # variable validations above already make this combination
+  # unreachable (only IAM_AUTH / SERVER_AUTHENTICATION are accepted at
+  # all), but this stays as a second, independent guard against a
+  # regression in those validations.
   assert {
     condition = !(
       local.authorization_mode == "IAM_AUTH" &&

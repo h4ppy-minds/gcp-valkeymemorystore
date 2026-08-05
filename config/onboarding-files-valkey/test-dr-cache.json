@@ -1,25 +1,23 @@
 {
   "type": "instance",
-  "request_type": "delete",
+  "request_type": "create",
   "environment": "dev",
   "requested_by": "platform-team",
   "instance": {
     "name": "test-dr-cache",
     "shard_count": 1,
     "replica_count": 1,
-    "server_type": "STANDARD_SMALL",
+    "server_type": "SHARED_CORE_NANO",
     "version": "VALKEY_9_0",
-    "authorization_mode": "IAM_AUTH",
-    "transit_encryption_mode": "SERVER_AUTHENTICATION",
-    "cross_region_replica": {
-      "enabled": true
-    },
+    "location": "us-east1",
+    "cross_region_replica": true,
     "persistence": {
       "mode": "RDB"
     },
+    "application_id": "platform-demo",
+    "lob": "cc-0003",
     "tags": {
-      "application_id": "platform-demo",
-      "lob": "cc-0003"
+      "criticality": "high"
     },
     "enable_alerting": false,
     "appteam_emails": [

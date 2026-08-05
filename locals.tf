@@ -1,32 +1,14 @@
 locals {
 
-  # var.env uses "prd" (matching typical TFC workspace naming, and
-  # matching default.json's environments.prd key), but the valkey
-  # module's environment variable validates against "PROD", not "PRD" —
-  # upper(var.env) alone would fail for prd specifically.
+  # var.env values match default.json's environments keys 1:1 (dev / qa /
+  # uat / prod), but the valkey module's environment variable validates
+  # against "PROD", not "prod" — upper(var.env) or a lookup map is still
+  # needed for that one case-sensitivity mismatch.
   _env_label = {
-    dev = "DEV"
-    qa  = "QA"
-    uat = "UAT"
-    prd = "PROD"
-  }
-
-  # Human-readable environment TAG value — kept separate from var.env
-  # itself. var.env stays the internal "prd" (matches the existing
-  # TFC/TFE workspace naming and default.json's environments.prd key);
-  # a label on the actual GCP resource should read "prod" the way a
-  # human would write it, not the internal workspace abbreviation.
-  #
-  # NOTE: confirm with the wrapper-API team whether "prd" or "prod" is
-  # the canonical env identifier going forward — default.json currently
-  # ships environments.prd, so that's what this module keys off of; this
-  # map only controls what shows up in the auto-populated `environment`
-  # tag.
-  _env_tag_label = {
-    dev = "dev"
-    qa  = "qa"
-    uat = "uat"
-    prd = "prod"
+    dev  = "DEV"
+    qa   = "QA"
+    uat  = "UAT"
+    prod = "PROD"
   }
 
   # --- Layer 1: global technical defaults + per-environment infra ---
@@ -51,13 +33,16 @@ locals {
     if f != "default.json"
   }
 
-  # Keyed by instance.name (the wrapper API's field for what the module
-  # calls instance_id). Excludes anything not targeting the current
-  # environment, and anything marked request_type = "delete". Every
-  # request file's instance.name MUST be unique across ALL files for
-  # this environment — two files sharing a name collide into a single
-  # map entry and one request silently disappears. (This bit a real
-  # onboarding request before: test-ha-cache.json had duplicated
+  # Keyed by instance.name — NOT the physical GCP instance_id (see Layer
+  # 3, which appends "-${var.env}" to build that). This is the stable
+  # Terraform for_each key, deliberately kept environment-agnostic, so
+  # that a request file's identity in state doesn't change if the
+  # env-suffix logic below ever changes. Excludes anything not targeting
+  # the current environment, and anything marked request_type = "delete".
+  # Every request file's instance.name MUST be unique across ALL files
+  # for this environment — two files sharing a name collide into a
+  # single map entry and one request silently disappears. (This bit a
+  # real onboarding request before: test-ha-cache.json had duplicated
   # test-dr-cache.json's "name": "test-dr-cache" instead of its own —
   # fixed in that file, but nothing here would have caught it
   # automatically. Consider a `check` block against
@@ -99,9 +84,26 @@ locals {
     for name, payload in local._requested_instances :
     name => {
       # --- Identity ---
-      instance_id = payload.instance.name
+      # The physical GCP resource name always gets an environment
+      # suffix — "test-ha-cache" becomes "test-ha-cache-dev" — so the
+      # same request-file name can exist independently in every
+      # environment without colliding, and so the environment an
+      # instance belongs to is legible from its name alone (in the GCP
+      # console, in gcloud output, in an incident channel) without
+      # having to go look up labels. The module's instance_id validation
+      # allows up to 63 chars; a 4-char env suffix leaves plenty of room
+      # for any reasonable request-file name.
+      instance_id = "${payload.instance.name}-${var.env}"
       project_id  = local._env_infra.project_id
-      location    = local._env_infra.location
+
+      # Primary location: instance-settable now (was previously locked
+      # to the environment's single fixed region). Falls back to the
+      # environment's default location when a request doesn't specify
+      # one. The module independently validates whatever region is
+      # chosen against the project's actually-available regions (see
+      # that module's data.tf) — this template does not maintain its
+      # own region allow-list.
+      location = try(payload.instance.location, local._env_infra.location)
 
       # --- Region / zone ---
       zone_distribution_mode = try(payload.instance.zone_distribution_mode, local._defaults_raw.zone_distribution_mode)
@@ -115,20 +117,27 @@ locals {
       replica_count = try(payload.instance.replica_count, 0)
 
       # --- PSC connectivity — host project/network are env-level infra,
-      # never instance-settable (same rule as project_id/location: a
-      # request can ask for SHARED_VPC, but never pick which shared VPC). ---
+      # never instance-settable (same rule as project_id: a request can
+      # ask for SHARED_VPC, but never pick which shared VPC). ---
       psc_connectivity_mode   = try(payload.instance.psc_connectivity_mode, local._defaults_raw.psc_connectivity_mode)
       shared_vpc_host_project = try(local._env_infra.networking.shared_vpc_network_project, null)
       shared_vpc_network_name = try(local._env_infra.networking.shared_vpc_network_name, null)
       existing_scp_name       = try(payload.instance.existing_scp_name, null)
 
       # --- Auth / TLS / CA / CMEK ---
-      authorization_mode      = try(payload.instance.authorization_mode, local._defaults_raw.authorization_mode)
-      transit_encryption_mode = try(payload.instance.transit_encryption_mode, local._defaults_raw.transit_encryption_mode)
-      server_ca_mode          = try(payload.instance.server_ca_mode, local._defaults_raw.server_ca_mode)
-      server_ca_pool          = try(payload.instance.server_ca_pool, null)
-      encryption_type         = try(payload.instance.encryption_type, local._defaults_raw.encryption_type)
-      kms_key                 = try(payload.instance.kms_key, null)
+      # authorization_mode / transit_encryption_mode are intentionally
+      # NOT read from the request or from default.json here anymore —
+      # the module itself now hard-requires IAM_AUTH /
+      # SERVER_AUTHENTICATION and rejects anything else via variable
+      # validation (see that module's CHANGELOG, 3.0.0), so there is no
+      # meaningful value this template could pass except the one the
+      # module already defaults to. Leaving these two unset lets the
+      # module supply them, instead of this template re-stating a value
+      # it can no longer actually change.
+      server_ca_mode  = try(payload.instance.server_ca_mode, local._defaults_raw.server_ca_mode)
+      server_ca_pool  = try(payload.instance.server_ca_pool, null)
+      encryption_type = try(payload.instance.encryption_type, local._defaults_raw.encryption_type)
+      kms_key         = try(payload.instance.kms_key, null)
 
       # --- Persistence (field-by-field — see note above) ---
       persistence_mode = try(payload.instance.persistence.mode, local._defaults_raw.persistence.mode)
@@ -174,12 +183,32 @@ locals {
       appteam_emails      = try(payload.instance.appteam_emails, [])
       platformteam_emails = try(payload.instance.platformteam_emails, try(local._defaults_raw.platformteam_emails, []))
 
-      # --- Raw tags + raw DR signal, carried through for Layer 4 to
-      # derive labels / deployment_topology / secondary_location from.
-      # Not module inputs themselves — main.tf never reads these two
-      # underscore-prefixed keys directly. ---
-      _raw_tags             = try(payload.instance.tags, {})
-      _cross_region_replica = try(payload.instance.cross_region_replica, false)
+      # --- Labels: application_id / lob arrive as instance-level fields
+      # (NOT nested under instance.tags — an earlier version of this
+      # template assumed the wrapper would nest them under "tags"; it
+      # doesn't). application_id falls back to default.json's
+      # aplication_name (that's the exact field name the wrapper API
+      # emits — a typo upstream, not one to silently "fix" here since
+      # this module has to consume exactly what the wrapper generates)
+      # when a request doesn't supply its own. lob has no default — a
+      # request either states its own cost center or the label is simply
+      # omitted. Both MUST end up in labels regardless of source; that
+      # happens in Layer 4, once topology/environment/managed_by are
+      # also known.
+      _application_id = try(payload.instance.application_id, local._defaults_raw.aplication_name)
+      _lob            = try(payload.instance.lob, null)
+      # instance.tags remains supported as a passthrough for any other
+      # ad-hoc label a request wants to add (anything beyond
+      # application_id/lob) — reserved keys (topology/environment/
+      # managed_by, and now application_id/lob themselves, since those
+      # have dedicated fields) are stripped in Layer 4 so there's exactly
+      # one source of truth for each.
+      _raw_tags = try(payload.instance.tags, {})
+
+      # --- Raw DR signal, carried through for Layer 4 to derive
+      # deployment_topology / secondary_location from. cross_region_replica
+      # is a plain boolean now — no more {"enabled": true} object shape. ---
+      _cross_region_replica = try(tobool(payload.instance.cross_region_replica), false)
     }
   }
 
@@ -189,11 +218,36 @@ locals {
   # no duplicated ternary to let the two drift apart.
   _topology_by_name = {
     for name, cfg in local._valkey_raw :
-    name => (
-      try(cfg._cross_region_replica.enabled, cfg._cross_region_replica == true) ? "DR" :
-      (cfg.replica_count > 0 ? "HA" : "STANDALONE")
-    )
+    name => (cfg._cross_region_replica ? "DR" : (cfg.replica_count > 0 ? "HA" : "STANDALONE"))
   }
+
+  # --- Cross-region DR pairing ---
+  # Cross-region replication is currently only supported between a fixed
+  # set of region pairs — a real capacity/availability constraint, not
+  # this template's preference. default.json.dr_region_pairs is a LIST
+  # of unordered pairs (one entry per pair, not two) — deliberately not
+  # a full symmetric map. A symmetric map means every new pair needs two
+  # entries kept in sync by hand ("us-central1": "us-east1" AND
+  # "us-east1": "us-central1"); miss one and you get a working DR
+  # request from one direction and a confusing failure from the other.
+  # A list of pairs needs exactly one entry per pair — this local
+  # expands it into a bidirectional lookup map at plan time, so nothing
+  # downstream has to know the difference. Growth is still one entry per
+  # newly-supported pair (inherent to "only these specific pairs work
+  # today," not a Terraform limitation) — but it's O(pairs), not
+  # O(pairs) *duplicated*, and a copy-paste asymmetry bug is no longer
+  # possible. If this ever needs to become "any region can DR to any
+  # other," that's a different design (drop the pairing table, let
+  # secondary_location be freely instance-settable, and let the module's
+  # own valid_secondary_location check be the only guard) — not a bigger
+  # pairing table.
+  _dr_pair_list = try(local._defaults_raw.dr_region_pairs, [])
+  _dr_region_pairs = merge([
+    for pair in local._dr_pair_list : {
+      (pair[0]) = pair[1]
+      (pair[1]) = pair[0]
+    }
+  ]...)
 
   # --- Layer 4: derive deployment_topology, secondary_location,
   # rdb_snapshot_start_time, and labels/tags — every value here needs
@@ -213,9 +267,15 @@ locals {
     name => merge(cfg, {
       deployment_topology = local._topology_by_name[name]
 
+      # Auto-picked from cfg.location (the PRIMARY region actually
+      # chosen for this instance) via the supported-pairs table — not
+      # from a fixed per-environment field. try() so an unsupported
+      # primary resolves to null (caught below by the
+      # cross_region_replica_requires_supported_pair check) instead of
+      # an opaque "attribute not found" error.
       secondary_location = (
         local._topology_by_name[name] == "DR"
-        ? local._env_infra.cross_region_replica.location
+        ? try(local._dr_region_pairs[cfg.location], null)
         : null
       )
 
@@ -230,26 +290,28 @@ locals {
         )
       )
 
-      # application_id falls back to default.json's aplication_name
-      # (that's the exact field name the wrapper API emits — a typo
-      # upstream, not one to silently "fix" here since this module has
-      # to consume exactly what the wrapper generates) when a request
-      # doesn't supply its own. Any other requester-supplied tag (e.g.
-      # lob) passes through unchanged; topology/environment/managed_by
-      # are always overwritten by the derived values below, never
-      # merged in from the request.
       labels = merge(
-        { application_id = try(cfg._raw_tags.application_id, local._defaults_raw.aplication_name) },
+        { application_id = cfg._application_id },
+        cfg._lob != null ? { lob = cfg._lob } : {},
         {
           for k, v in cfg._raw_tags : k => v
-          if !contains(["application_id", "topology", "environment", "managed_by"], k)
+          if !contains(["application_id", "lob", "topology", "environment", "managed_by"], k)
         },
         {
           topology    = lower(local._topology_by_name[name])
-          environment = local._env_tag_label[var.env]
+          environment = var.env
           managed_by  = "terraform"
         }
       )
     })
+  }
+}
+
+check "cross_region_replica_requires_supported_pair" {
+  assert {
+    condition = alltrue([
+      for name, cfg in local.valkey : cfg.deployment_topology != "DR" || cfg.secondary_location != null
+    ])
+    error_message = "One or more DR requests picked a primary `location` with no supported DR secondary. Cross-region replication is currently only supported between the pairs listed in default.json's dr_region_pairs (today: ${join(", ", [for p in local._dr_pair_list : "${p[0]} <-> ${p[1]}"])}). Either change that instance's location to a supported primary, or ask the platform team to add a new pair to default.json.dr_region_pairs."
   }
 }

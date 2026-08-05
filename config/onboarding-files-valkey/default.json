@@ -6,8 +6,6 @@
   "shard_count": 1,
   "zone_distribution_mode": "MULTI_ZONE",
   "psc_connectivity_mode": "SHARED_VPC",
-  "authorization_mode": "AUTH_DISABLED",
-  "transit_encryption_mode": "TRANSIT_ENCRYPTION_DISABLED",
   "server_ca_mode": "GOOGLE_MANAGED_PER_INSTANCE_CA",
   "encryption_type": "GOOGLE_MANAGED",
   "persistence": {
@@ -41,6 +39,9 @@
   "platformteam_emails": [
     "sifukun23@gmail.com"
   ],
+  "dr_region_pairs": [
+    ["us-central1", "us-east1"]
+  ],
   "environments": {
     "dev": {
       "project_id": "valkeyhubhost-500604",
@@ -48,10 +49,6 @@
       "networking": {
         "shared_vpc_network_project": "net-host-prod-502521",
         "shared_vpc_network_name": "shared-net"
-      },
-      "cross_region_replica": {
-        "location": "us-east1",
-        "enabled": false
       }
     },
     "qa": {
@@ -60,10 +57,6 @@
       "networking": {
         "shared_vpc_network_project": "net-host-prod-502521",
         "shared_vpc_network_name": "shared-net"
-      },
-      "cross_region_replica": {
-        "location": "us-central1",
-        "enabled": false
       }
     },
     "uat": {
@@ -72,22 +65,14 @@
       "networking": {
         "shared_vpc_network_project": "net-host-prod-502521",
         "shared_vpc_network_name": "shared-net"
-      },
-      "cross_region_replica": {
-        "location": "us-west1",
-        "enabled": false
       }
     },
-    "prd": {
+    "prod": {
       "project_id": "your-prod-project-id",
       "location": "us-central1",
       "networking": {
         "shared_vpc_network_project": "net-host-prod-502521",
         "shared_vpc_network_name": "shared-net"
-      },
-      "cross_region_replica": {
-        "location": "us-west1",
-        "enabled": false
       }
     }
   }

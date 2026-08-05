@@ -47,12 +47,15 @@ module "valkey" {
   existing_scp_name       = try(each.value.existing_scp_name, null)
 
   # --- Auth / TLS / CA / CMEK ---
-  authorization_mode      = each.value.authorization_mode
-  transit_encryption_mode = each.value.transit_encryption_mode
-  server_ca_mode          = each.value.server_ca_mode
-  server_ca_pool          = try(each.value.server_ca_pool, null)
-  encryption_type         = each.value.encryption_type
-  kms_key                 = try(each.value.kms_key, null)
+  # authorization_mode / transit_encryption_mode are intentionally NOT
+  # passed here — the module hard-requires IAM_AUTH / SERVER_AUTHENTICATION
+  # and rejects any other value via variable validation (module CHANGELOG
+  # 3.0.0), so there's nothing for this template to override. Leaving
+  # them unset gets the module's (only) secure default.
+  server_ca_mode  = each.value.server_ca_mode
+  server_ca_pool  = try(each.value.server_ca_pool, null)
+  encryption_type = each.value.encryption_type
+  kms_key         = try(each.value.kms_key, null)
 
   # --- Persistence / backups / maintenance ---
   persistence_mode        = each.value.persistence_mode

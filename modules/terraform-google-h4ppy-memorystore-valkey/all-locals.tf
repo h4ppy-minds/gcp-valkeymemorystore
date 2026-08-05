@@ -62,6 +62,11 @@ locals {
     psc_connectivity_mode = "NONE"
 
     # --- auth / TLS / CA / CMEK ---
+    # authorization_mode / transit_encryption_mode are not just defaults —
+    # variables.tf's validation blocks reject any value other than
+    # IAM_AUTH / SERVER_AUTHENTICATION (or null, which lands here). There
+    # is no supported way for a caller to get an unauthenticated or
+    # unencrypted instance out of this module.
     authorization_mode      = "IAM_AUTH"
     transit_encryption_mode = "SERVER_AUTHENTICATION"
     server_ca_mode          = "GOOGLE_MANAGED_PER_INSTANCE_CA"

@@ -1,6 +1,6 @@
 {
   "type": "instance",
-  "request_type": "delete",
+  "request_type": "create",
   "environment": "dev",
   "requested_by": "platform-team",
   "instance": {
@@ -10,13 +10,11 @@
     "replica_count": 0,
     "server_type": "SHARED_CORE_NANO",
     "version": "VALKEY_9_0",
-    "authorization_mode": "AUTH_DISABLED",
-    "transit_encryption_mode": "TRANSIT_ENCRYPTION_DISABLED",
-    "tags": {
-      "application_id": "platform-demo",
-      "lob": "cc-0001"
-    },
-    "enable_alerting": false,
-    "appteam_emails": []
+    "application_id": "platform-demo",
+    "lob": "cc-0001",
+    "enable_alerting": true,
+    "appteam_emails": [
+      "app@example.com"
+    ]
   }
 }
