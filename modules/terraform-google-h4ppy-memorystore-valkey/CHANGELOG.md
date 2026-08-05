@@ -14,9 +14,20 @@ matching `vMAJOR.MINOR.PATCH`.
 > feature set rather than as a breaking change between published
 > versions.
 
-## [3.0.0] - 2026-08-04
+## [2.0.1-pre] - 2026-08-04
 
-### Changed — BREAKING
+> Tagged as a pre-release (`v2.0.1-pre`), not yet promoted to a stable
+> tag — apply it in a non-prod environment first and confirm nothing in
+> your callers still depends on the values being removed below.
+>
+> **Semver note:** strictly speaking this removes previously-accepted
+> input values (`AUTH_DISABLED`, `TRANSIT_ENCRYPTION_DISABLED`), which
+> is breaking behavior — a `2.0.x` patch tag doesn't fully capture that.
+> Flagging this so it isn't missed by anyone skimming version numbers
+> instead of reading changelogs; treat this the way you'd treat a major
+> bump when deciding whether to auto-upgrade.
+
+### Security
 - **`authorization_mode` and `transit_encryption_mode` no longer accept
   insecure values.** `authorization_mode` must now be `IAM_AUTH` (or
   unset); `AUTH_DISABLED` is rejected by variable validation.

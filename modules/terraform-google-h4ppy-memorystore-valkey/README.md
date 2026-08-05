@@ -53,7 +53,7 @@ value each — `IAM_AUTH` and `SERVER_AUTHENTICATION` respectively (or
 leave them unset, which resolves to the same thing). Variable validation
 rejects `AUTH_DISABLED` and `TRANSIT_ENCRYPTION_DISABLED` outright; there
 is no supported way to create an unauthenticated or unencrypted instance
-with this module. See `CHANGELOG.md`'s `3.0.0` entry if you're migrating
+with this module. See `CHANGELOG.md`'s `2.0.1-pre` entry if you're migrating
 a caller that previously overrode either of these.
 
 ## The "one file for defaults" design
