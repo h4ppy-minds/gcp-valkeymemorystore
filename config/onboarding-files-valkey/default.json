@@ -17,11 +17,7 @@
       "append_fsync": "EVERY_SEC"
     }
   },
-  "backup": {
-    "enabled": true,
-    "start_hour": 3,
-    "backup_retention_days": 14
-  },
+  "backup": true,
   "version": "VALKEY_9_0",
   "maintenance_window": {
     "day_of_week": "SUNDAY",

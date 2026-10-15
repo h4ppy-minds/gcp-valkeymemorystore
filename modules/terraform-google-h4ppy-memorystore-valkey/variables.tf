@@ -21,7 +21,7 @@ variable "deployment_topology" {
   nullable    = true
 
   validation {
-    condition     = var.deployment_topology == null || contains(["STANDALONE", "HA", "DR"], var.deployment_topology)
+    condition     = var.deployment_topology == null ? true : contains(["STANDALONE", "HA", "DR"], var.deployment_topology)
     error_message = "deployment_topology must be one of: STANDALONE, HA, DR."
   }
 }
@@ -34,7 +34,7 @@ variable "secondary_location" {
   nullable    = true
 
   validation {
-    condition     = var.secondary_location == null || var.secondary_location != var.location
+    condition     = var.secondary_location == null ? true : var.secondary_location != var.location
     error_message = "secondary_location must differ from location (primary and secondary must be in different regions)."
   }
 }
@@ -73,7 +73,7 @@ variable "instance_id" {
   nullable    = true
 
   validation {
-    condition     = var.instance_id == null || can(regex("^[a-z][a-z0-9-]{0,61}[a-z0-9]$", var.instance_id))
+    condition     = var.instance_id == null ? true : can(regex("^[a-z][a-z0-9-]{0,61}[a-z0-9]$", var.instance_id))
     error_message = "instance_id must start with a lowercase letter, use only lowercase letters/numbers/hyphens, and be 2-63 characters."
   }
 }
@@ -106,7 +106,7 @@ variable "zone_distribution_mode" {
   nullable    = true
 
   validation {
-    condition     = var.zone_distribution_mode == null || contains(["SINGLE_ZONE", "MULTI_ZONE"], var.zone_distribution_mode)
+    condition     = var.zone_distribution_mode == null ? true : contains(["SINGLE_ZONE", "MULTI_ZONE"], var.zone_distribution_mode)
     error_message = "zone_distribution_mode must be either SINGLE_ZONE or MULTI_ZONE."
   }
 }
@@ -139,7 +139,7 @@ variable "cluster_mode" {
   nullable    = true
 
   validation {
-    condition     = var.cluster_mode == null || contains(["CLUSTER", "CLUSTER_DISABLED"], var.cluster_mode)
+    condition     = var.cluster_mode == null ? true : contains(["CLUSTER", "CLUSTER_DISABLED"], var.cluster_mode)
     error_message = "cluster_mode must be either 'CLUSTER' or 'CLUSTER_DISABLED'."
   }
 }
@@ -152,7 +152,7 @@ variable "node_type" {
   nullable    = true
 
   validation {
-    condition = var.node_type == null || contains([
+    condition = var.node_type == null ? true : contains([
       "SHARED_CORE_NANO", "CUSTOM_PICO", "CUSTOM_MICRO", "CUSTOM_MINI",
       "HIGHMEM_MEDIUM", "HIGHCPU_MEDIUM", "HIGHMEM_XLARGE",
       "STANDARD_SMALL", "STANDARD_LARGE", "HIGHMEM_2XLARGE"
@@ -188,11 +188,11 @@ variable "replica_count" {
   nullable    = true
 
   validation {
-    condition     = var.replica_count == null || (var.replica_count >= 0 && var.replica_count <= 5)
+    condition     = var.replica_count == null ? true : (var.replica_count >= 0 && var.replica_count <= 5)
     error_message = "replica_count must be between 0 and 5 (inclusive)."
   }
   validation {
-    condition     = var.replica_count == null || var.replica_count == floor(var.replica_count)
+    condition     = var.replica_count == null ? true : var.replica_count == floor(var.replica_count)
     error_message = "replica_count must be a whole number."
   }
 }
@@ -227,7 +227,7 @@ variable "psc_connectivity_mode" {
   nullable    = true
 
   validation {
-    condition     = var.psc_connectivity_mode == null || contains(["NONE", "SHARED_VPC"], var.psc_connectivity_mode)
+    condition     = var.psc_connectivity_mode == null ? true : contains(["NONE", "SHARED_VPC"], var.psc_connectivity_mode)
     error_message = "psc_connectivity_mode must be one of: NONE, SHARED_VPC."
   }
 }
@@ -268,7 +268,7 @@ variable "authorization_mode" {
   nullable    = true
 
   validation {
-    condition     = var.authorization_mode == null || var.authorization_mode == "IAM_AUTH"
+    condition     = var.authorization_mode == null ? true : var.authorization_mode == "IAM_AUTH"
     error_message = "authorization_mode must be IAM_AUTH (or unset, which defaults to IAM_AUTH) — this module does not support AUTH_DISABLED. Every instance created by this module requires client authentication; there is no override for this."
   }
 }
@@ -281,7 +281,7 @@ variable "transit_encryption_mode" {
   nullable    = true
 
   validation {
-    condition     = var.transit_encryption_mode == null || var.transit_encryption_mode == "SERVER_AUTHENTICATION"
+    condition     = var.transit_encryption_mode == null ? true : var.transit_encryption_mode == "SERVER_AUTHENTICATION"
     error_message = "transit_encryption_mode must be SERVER_AUTHENTICATION (or unset, which defaults to SERVER_AUTHENTICATION) — this module does not support TRANSIT_ENCRYPTION_DISABLED. authorization_mode is always IAM_AUTH in this module, and IAM access tokens sent without TLS are exposed in plaintext; there is no override for this."
   }
 }
@@ -313,7 +313,7 @@ variable "server_ca_mode" {
   nullable    = true
 
   validation {
-    condition = var.server_ca_mode == null || contains(
+    condition = var.server_ca_mode == null ? true : contains(
       ["GOOGLE_MANAGED_PER_INSTANCE_CA", "GOOGLE_MANAGED_SHARED_CA", "CUSTOMER_MANAGED_CAS_CA"],
       var.server_ca_mode
     )
@@ -341,7 +341,7 @@ variable "encryption_type" {
   nullable    = true
 
   validation {
-    condition     = var.encryption_type == null || contains(["GOOGLE_MANAGED", "CUSTOMER_MANAGED"], var.encryption_type)
+    condition     = var.encryption_type == null ? true : contains(["GOOGLE_MANAGED", "CUSTOMER_MANAGED"], var.encryption_type)
     error_message = "encryption_type must be one of: GOOGLE_MANAGED, CUSTOMER_MANAGED."
   }
 }
@@ -355,7 +355,7 @@ variable "kms_key" {
 
   validation {
     condition = (
-      var.kms_key == null ||
+      var.kms_key == null ? true :
       can(regex("^projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+$", var.kms_key))
     )
     error_message = "kms_key must be a full CryptoKey resource ID: projects/PROJECT_ID/locations/REGION/keyRings/RING_ID/cryptoKeys/KEY_ID."
@@ -374,7 +374,7 @@ variable "persistence_mode" {
   nullable    = true
 
   validation {
-    condition     = var.persistence_mode == null || contains(["RDB", "AOF", "DISABLED"], var.persistence_mode)
+    condition     = var.persistence_mode == null ? true : contains(["RDB", "AOF", "DISABLED"], var.persistence_mode)
     error_message = "persistence_mode must be one of: RDB, AOF, DISABLED."
   }
 }
@@ -388,7 +388,7 @@ variable "rdb_snapshot_period" {
 
   validation {
     condition = (
-      var.rdb_snapshot_period == null ||
+      var.rdb_snapshot_period == null ? true :
       contains(["ONE_HOUR", "SIX_HOURS", "TWELVE_HOURS", "TWENTY_FOUR_HOURS"], var.rdb_snapshot_period)
     )
     error_message = "rdb_snapshot_period must be one of: ONE_HOUR, SIX_HOURS, TWELVE_HOURS, TWENTY_FOUR_HOURS."
@@ -413,7 +413,7 @@ variable "aof_config" {
   nullable    = true
 
   validation {
-    condition     = var.aof_config == null || contains(["ALWAYS", "EVERY_SEC", "NO"], var.aof_config.append_fsync)
+    condition     = var.aof_config == null ? true : contains(["ALWAYS", "EVERY_SEC", "NO"], var.aof_config.append_fsync)
     error_message = "aof_config.append_fsync must be one of: ALWAYS, EVERY_SEC, NO."
   }
 }
@@ -438,7 +438,7 @@ variable "automated_backup_start_time_hour" {
   nullable    = true
 
   validation {
-    condition     = var.automated_backup_start_time_hour == null || (var.automated_backup_start_time_hour >= 0 && var.automated_backup_start_time_hour <= 23)
+    condition     = var.automated_backup_start_time_hour == null ? true : (var.automated_backup_start_time_hour >= 0 && var.automated_backup_start_time_hour <= 23)
     error_message = "automated_backup_start_time_hour must be between 0 and 23."
   }
 }
@@ -451,7 +451,7 @@ variable "automated_backup_retention_days" {
   nullable    = true
 
   validation {
-    condition     = var.automated_backup_retention_days == null || (var.automated_backup_retention_days >= 1 && var.automated_backup_retention_days <= 365)
+    condition     = var.automated_backup_retention_days == null ? true : (var.automated_backup_retention_days >= 1 && var.automated_backup_retention_days <= 365)
     error_message = "automated_backup_retention_days must be between 1 and 365."
   }
 }
@@ -468,7 +468,7 @@ variable "maintenance_day" {
   nullable    = true
 
   validation {
-    condition = var.maintenance_day == null || contains(
+    condition = var.maintenance_day == null ? true : contains(
       ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"],
       var.maintenance_day
     )
@@ -484,7 +484,7 @@ variable "maintenance_start_hour" {
   nullable    = true
 
   validation {
-    condition     = var.maintenance_start_hour == null || (var.maintenance_start_hour >= 0 && var.maintenance_start_hour <= 23)
+    condition     = var.maintenance_start_hour == null ? true : (var.maintenance_start_hour >= 0 && var.maintenance_start_hour <= 23)
     error_message = "maintenance_start_hour must be between 0 and 23."
   }
 }
@@ -501,7 +501,7 @@ variable "engine_version" {
   nullable    = true
 
   validation {
-    condition     = var.engine_version == null || contains(["VALKEY_7_2", "VALKEY_8_0", "VALKEY_9_0"], var.engine_version)
+    condition     = var.engine_version == null ? true : contains(["VALKEY_7_2", "VALKEY_8_0", "VALKEY_9_0"], var.engine_version)
     error_message = "engine_version must be one of: VALKEY_7_2, VALKEY_8_0, VALKEY_9_0 (check current GA versions in provider docs before deploying — Google adds new versions over time)."
   }
 }
@@ -514,7 +514,7 @@ variable "maxmemory_policy" {
   nullable    = true
 
   validation {
-    condition = var.maxmemory_policy == null || contains(
+    condition = var.maxmemory_policy == null ? true : contains(
       ["noeviction", "allkeys-lfu", "allkeys-lru", "volatile-lfu", "volatile-lru", "allkeys-random", "volatile-random", "volatile-ttl"],
       var.maxmemory_policy
     )

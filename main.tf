@@ -15,7 +15,7 @@
 module "valkey" {
   source = "./modules/terraform-google-h4ppy-memorystore-valkey"
   #source   = "app.terraform.io/<YOUR_ORG>/valkey/google" # replace <YOUR_ORG>; see REGISTRY_PUBLISHING.md
-  #version  = "~> 2.1"
+  #version  = "~> 2.0" # Terraform version constraints don't match pre-release tags (e.g. 2.0.1-pre) unless pinned exactly — use "= 2.0.1-pre" while testing a pre-release, switch to "~> 2.0" once it's promoted to a stable tag.
   for_each = local.valkey
 
   # --- Topology (derived in locals.tf from cross_region_replica + replica_count) ---
@@ -63,9 +63,13 @@ module "valkey" {
   rdb_snapshot_start_time = each.value.rdb_snapshot_start_time # always set (possibly null) by locals.tf's final merge
   aof_config              = try(each.value.aof_config, null)
 
-  automated_backup_enabled         = each.value.automated_backup_enabled
-  automated_backup_start_time_hour = each.value.automated_backup_start_time_hour
-  automated_backup_retention_days  = each.value.automated_backup_retention_days
+  # automated_backup_start_time_hour / automated_backup_retention_days
+  # are intentionally NOT passed here — left unset, the module supplies
+  # its own defaults (hour = 3, retention = 35 days; see that module's
+  # all-locals.tf). Only whether backups happen at all is
+  # request-settable, same pattern as authorization_mode/
+  # transit_encryption_mode above.
+  automated_backup_enabled = each.value.automated_backup_enabled
 
   maintenance_day        = each.value.maintenance_day
   maintenance_start_hour = each.value.maintenance_start_hour

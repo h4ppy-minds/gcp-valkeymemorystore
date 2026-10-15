@@ -80,7 +80,7 @@ by field:
     "replica_count": 0,
     "server_type": "STANDARD_SMALL",
     "version": "VALKEY_9_0",
-    "location": "us-east4",
+    "location": "us-east1",
     "cross_region_replica": true,
     "persistence": { "mode": "RDB" },
     "application_id": "my-app",
@@ -123,15 +123,23 @@ by field:
   `default.json`'s `dr_region_pairs` table — there is no separate field
   for the secondary region. Cross-region replication is currently only
   supported between region pairs listed in that table (today:
-  `us-central1 <-> us-east4`); requesting DR from an unlisted primary
+  `us-central1 <-> us-east1`); requesting DR from an unlisted primary
   region fails `terraform plan` with a clear error rather than silently
   picking something.
-- Nested objects (`persistence`, `backup`, `maintenance_window`,
-  `config`) can be **partially** overridden — e.g. `{"persistence":
-  {"mode": "AOF"}}` still inherits `persistence.aof_config.append_fsync`
-  from `default.json` rather than losing it. `locals.tf` merges these
-  field by field for exactly this reason (a plain top-level `merge()`
-  would silently drop unspecified nested fields).
+- `backup` is also a plain boolean (`true`/`false`) — not an object.
+  It only controls whether automated backups happen at all; the
+  schedule (`start_hour`) and retention (`backup_retention_days`) are
+  NOT request-settable or `default.json`-settable — they come from the
+  Terraform module's own defaults (currently hour `3` UTC, retention
+  `35` days) so there's exactly one place that sets "what a normal
+  backup schedule looks like" instead of this template silently
+  overriding it to different numbers per environment.
+- Nested objects (`persistence`, `maintenance_window`, `config`) can be
+  **partially** overridden — e.g. `{"persistence": {"mode": "AOF"}}`
+  still inherits `persistence.aof_config.append_fsync` from
+  `default.json` rather than losing it. `locals.tf` merges these field
+  by field for exactly this reason (a plain top-level `merge()` would
+  silently drop unspecified nested fields).
 - Setting `"request_type": "delete"` removes the instance from
   `local.valkey` (and therefore from both modules' `for_each`) on the
   next apply — no separate destroy step needed.
@@ -167,7 +175,7 @@ keys in `instance.tags`:
 
 See the `test-*.json` files in `config/onboarding-files-valkey/` for
 current examples of all three topologies, including a DR example
-(`test-dr-cache.json`) that requests `us-east4` as primary and gets
+(`test-dr-cache.json`) that requests `us-east1` as primary and gets
 `us-central1` picked automatically as its secondary.
 
 ## ⚠️ Migration note: instance IDs now get an environment suffix
